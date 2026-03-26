@@ -537,7 +537,9 @@
     display: flex; align-items: center; justify-content: space-between;
   }
   .cam-ctrl-side {
-    width: 56px; display: flex; align-items: center; justify-content: center;
+    width: 56px;
+    display: flex;
+    align-items: center; justify-content: center;
   }
   .cam-flash-btn {
     width: 44px; height: 44px; border-radius: 50%;
@@ -628,6 +630,113 @@
   .btn-cam-action:active { transform: scale(0.97); opacity: 0.85; }
   .btn-retake { background: rgba(255,255,255,0.12); color: #fff; border: 1.5px solid rgba(255,255,255,0.2); }
   .btn-use { background: var(--gold); color: var(--forest); }
+
+  /* ── RESULT SCREEN ── */
+  #screen-result {
+    background: var(--cream);
+    position: fixed; inset: 0; z-index: 170;
+    display: none; flex-direction: column;
+    overflow: hidden;
+  }
+  #screen-result.active { display: flex; }
+
+  .result-topbar {
+    background: var(--forest);
+    color: #fff;
+    padding: 0 16px;
+    height: 60px;
+    display: flex; align-items: center; gap: 12px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+  }
+  .result-topbar-info { flex: 1; min-width: 0; }
+  .result-topbar-title { font-size: 15px; font-weight: 700; }
+  .result-topbar-sub { font-size: 11px; color: var(--gold); opacity: 0.9; }
+  .result-score-badge {
+    background: var(--gold); color: var(--forest);
+    font-family: 'Space Mono', monospace;
+    font-size: 13px; font-weight: 700;
+    padding: 5px 12px; border-radius: 20px; flex-shrink: 0;
+    min-width: 60px; text-align: center;
+  }
+
+  .result-img-wrap {
+    position: relative;
+    flex-shrink: 0;
+    height: 38vh;
+    background: #000;
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #result-canvas {
+    max-width: 100%; max-height: 100%;
+    object-fit: contain;
+  }
+  .result-processing {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.7);
+    color: #fff;
+    gap: 12px;
+  }
+  .result-processing.hidden { display: none; }
+  .result-spinner {
+    width: 36px; height: 36px;
+    border: 3px solid rgba(127,255,212,0.2);
+    border-top-color: var(--gold);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .result-processing-label { font-size: 14px; color: rgba(255,255,255,0.8); }
+
+  .result-answers-panel {
+    flex: 1; overflow-y: auto;
+    padding: 14px 16px 100px;
+  }
+  .result-answers-title {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+  .result-answers-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+  .result-answer-cell {
+    background: var(--white);
+    border-radius: 8px;
+    padding: 8px 4px;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+    border: 1.5px solid var(--cream-dark);
+    position: relative;
+  }
+  .result-answer-cell.correct { border-color: #22c55e; background: #dcfce7; }
+  .result-answer-cell.wrong   { border-color: #ef4444; background: #fee2e2; }
+  .result-answer-cell.flag    { border-color: #f59e0b; background: #fef3c7; }
+  .result-answer-qnum {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px; color: var(--text-muted); margin-bottom: 3px;
+  }
+  .result-answer-letter {
+    font-family: 'Space Mono', monospace;
+    font-size: 15px; font-weight: 700; color: var(--text);
+  }
+  .result-answer-cell.correct .result-answer-letter { color: #15803d; }
+  .result-answer-cell.wrong   .result-answer-letter { color: #b91c1c; }
+  .result-answer-cell.flag    .result-answer-letter { color: #b45309; }
+
+  .result-flags {
+    background: #fef3c7; border: 1.5px solid #f59e0b;
+    border-radius: var(--radius); padding: 12px 14px;
+    font-size: 13px; color: #92400e; line-height: 1.6;
+    display: none;
+  }
+  .result-flags.visible { display: block; }
 
   /* ── TOAST ── */
   .toast {
@@ -846,7 +955,39 @@
 </div>
 
 
-<div class="modal-overlay" id="delete-modal">
+<!-- RESULT SCREEN -->
+<div class="screen" id="screen-result">
+  <div class="result-topbar">
+    <button class="cam-back-btn" onclick="discardResult()">&#8592;</button>
+    <div class="result-topbar-info">
+      <div class="result-topbar-title">Review Sheet</div>
+      <div class="result-topbar-sub" id="result-candidate-label">Reading…</div>
+    </div>
+    <div class="result-score-badge" id="result-score-badge">—</div>
+  </div>
+
+  <!-- Debug image with bubble overlay -->
+  <div class="result-img-wrap">
+    <canvas id="result-canvas"></canvas>
+    <div class="result-processing" id="result-processing">
+      <div class="result-spinner"></div>
+      <div class="result-processing-label">Reading sheet…</div>
+    </div>
+  </div>
+
+  <!-- Detected answers grid -->
+  <div class="result-answers-panel" id="result-answers-panel">
+    <div class="result-answers-title">Detected Answers</div>
+    <div class="result-answers-grid" id="result-answers-grid"></div>
+    <div class="result-flags" id="result-flags"></div>
+  </div>
+
+  <div class="bottom-actions">
+    <button class="btn-secondary" onclick="discardResult()">Discard</button>
+    <button class="btn-save" onclick="confirmResult()">Confirm &amp; Next →</button>
+  </div>
+</div>
+
   <div class="modal">
     <div class="modal-title">Delete Exam?</div>
     <div class="modal-body">
@@ -1497,15 +1638,285 @@ function retakePhoto() {
 }
 
 function usePhoto() {
-  // Store the capture in session (M3 will process it)
-  if (capturedDataUrl) {
-    sessionResults.push({ dataUrl: capturedDataUrl, timestamp: Date.now() });
-    updateCamCounter();
-  }
+  if (!capturedDataUrl) return;
+  const dataUrl = capturedDataUrl;
   hidePreviewScreen();
-  // M3 hook: processCapture(capturedDataUrl) will go here
-  showToast(`Sheet ${sessionResults.length} captured ✓`);
+  showResultScreen(dataUrl);
 }
+
+// ── M3: GES Template ──────────────────────────────────────────────
+const GES_TEMPLATE = {
+  id: 'ges-standard-v1',
+  name: 'GES Standard Answer Sheet',
+  aspectRatio: 0.7158,
+
+  // Y center of each question row as a fraction of sheet height.
+  // 25 rows across 3 columns = max 75 questions, but GES sheet shows 1-60.
+  // Layout: col1=Q1-20 (rows 0-19), col2=Q21-40, col3=Q41-60.
+  rowYs: [
+    0.4276, 0.4446, 0.4615, 0.4772, 0.4941,   // rows 1-5
+    0.5346, 0.5528, 0.5711, 0.5893, 0.6063,   // rows 6-10
+    0.6375, 0.6545, 0.6728, 0.6910, 0.7093,   // rows 11-15
+    0.7340, 0.7523, 0.7705, 0.7888, 0.8057,   // rows 16-20
+    0.8370, 0.8540, 0.8722, 0.8905, 0.9087,   // rows 21-25 (spare)
+  ],
+
+  // Bubble X centers per column [A, B, C, D] as fraction of sheet width.
+  // Derived from pixel analysis of the real GES sheet image.
+  columns: [
+    { bubbleXs: [0.1311, 0.1767, 0.2222, 0.2678] }, // Col1: Q1-20
+    { bubbleXs: [0.4135, 0.4590, 0.5100, 0.5610] }, // Col2: Q21-40
+    { bubbleXs: [0.7049, 0.7559, 0.8106, 0.8597] }, // Col3: Q41-60
+  ],
+
+  // Sampling radius as fraction of sheet width
+  sampleRadius: 0.022,
+
+  // Fraction of sampled pixels that must be dark to count as "filled"
+  fillThreshold: 0.28,
+};
+
+// ── M3: Image Processing ──────────────────────────────────────────
+function toGrayscale(imageData) {
+  const { data, width, height } = imageData;
+  const gray = new Uint8Array(width * height);
+  for (let i = 0; i < gray.length; i++) {
+    const r = data[i * 4];
+    const g = data[i * 4 + 1];
+    const b = data[i * 4 + 2];
+    gray[i] = (r * 77 + g * 150 + b * 29) >> 8; // fast luma
+  }
+  return gray;
+}
+
+function sampleBubble(gray, imgW, imgH, cx, cy, radius) {
+  // Count dark pixels (< 128) within a circle of given radius
+  let dark = 0, total = 0;
+  const r2 = radius * radius;
+  const x0 = Math.max(0, cx - radius);
+  const x1 = Math.min(imgW - 1, cx + radius);
+  const y0 = Math.max(0, cy - radius);
+  const y1 = Math.min(imgH - 1, cy + radius);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const dx = x - cx, dy = y - cy;
+      if (dx * dx + dy * dy <= r2) {
+        total++;
+        if (gray[y * imgW + x] < 128) dark++;
+      }
+    }
+  }
+  return total > 0 ? dark / total : 0;
+}
+
+function processSheet(dataUrl, template, questionCount) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      // Draw to offscreen canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, img.width, img.height);
+      const gray = toGrayscale(imageData);
+      const W = img.width, H = img.height;
+
+      const answers = [];
+      const bubbleMap = []; // for debug overlay
+
+      const radius = Math.round(template.sampleRadius * W);
+      const letters = ['A', 'B', 'C', 'D'];
+
+      for (let q = 0; q < questionCount; q++) {
+        const colIndex = Math.floor(q / 20);
+        const rowIndex = q % 20;
+        if (colIndex >= template.columns.length) break;
+        if (rowIndex >= template.rowYs.length) break;
+
+        const cy = Math.round(template.rowYs[rowIndex] * H);
+        const col = template.columns[colIndex];
+        const darknesses = col.bubbleXs.map(xFrac =>
+          sampleBubble(gray, W, H, Math.round(xFrac * W), cy, radius)
+        );
+
+        const filled = darknesses.map((d, i) => ({
+          letter: letters[i],
+          darkness: d,
+          filled: d >= template.fillThreshold,
+        }));
+        const filledOnes = filled.filter(b => b.filled);
+
+        let answer;
+        if (filledOnes.length === 0)      answer = 'BLANK';
+        else if (filledOnes.length > 1)   answer = 'DOUBLE';
+        else                              answer = filledOnes[0].letter;
+
+        answers.push(answer);
+        bubbleMap.push({
+          qNum: q + 1,
+          cy,
+          bubbles: col.bubbleXs.map((xFrac, i) => ({
+            cx: Math.round(xFrac * W),
+            cy,
+            letter: letters[i],
+            darkness: darknesses[i],
+            filled: filled[i].filled,
+          })),
+          answer,
+        });
+      }
+
+      resolve({ answers, bubbleMap, width: W, height: H });
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+// Draw debug overlay on the result canvas
+function drawDebugOverlay(dataUrl, bubbleMap, width, height) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.getElementById('result-canvas');
+      const maxW = canvas.parentElement.clientWidth;
+      const scale = maxW / width;
+      canvas.width  = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const r = Math.round(GES_TEMPLATE.sampleRadius * width * scale);
+
+      bubbleMap.forEach(row => {
+        row.bubbles.forEach(b => {
+          const cx = Math.round(b.cx * scale);
+          const cy = Math.round(b.cy * scale);
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          if (b.letter === row.answer && row.answer !== 'BLANK' && row.answer !== 'DOUBLE') {
+            ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 2.5;  // correct detection
+          } else if (row.answer === 'DOUBLE') {
+            ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2;    // ambiguous
+          } else if (row.answer === 'BLANK') {
+            ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 1.5;
+          } else {
+            ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1;
+          }
+          ctx.stroke();
+        });
+      });
+      resolve();
+    };
+    img.src = dataUrl;
+  });
+}
+
+// ── M3: Result Screen ──────────────────────────────────────────────
+let pendingResult = null; // { dataUrl, answers, bubbleMap, score, flagged }
+
+async function showResultScreen(dataUrl) {
+  // Show the screen immediately with spinner
+  document.getElementById('screen-result').classList.add('active');
+  document.getElementById('result-processing').classList.remove('hidden');
+  document.getElementById('result-answers-panel').style.opacity = '0';
+  document.getElementById('result-candidate-label').textContent = 'Processing…';
+  document.getElementById('result-score-badge').textContent = '—';
+
+  try {
+    const qCount = gradingExam.questionCount;
+    const { answers, bubbleMap, width, height } = await processSheet(dataUrl, GES_TEMPLATE, qCount);
+
+    // Score
+    const key = gradingExam.answerKey;
+    let correct = 0;
+    answers.forEach((ans, i) => {
+      if (ans === key[i]) correct++;
+    });
+
+    const flagged = answers.some(a => a === 'BLANK' || a === 'DOUBLE');
+    const score = `${correct}/${qCount}`;
+    const pct = Math.round((correct / qCount) * 100);
+
+    // Store pending result
+    pendingResult = { dataUrl, answers, bubbleMap, score, correct, qCount, flagged };
+
+    // Draw overlay
+    await drawDebugOverlay(dataUrl, bubbleMap, width, height);
+    document.getElementById('result-processing').classList.add('hidden');
+
+    // Update topbar
+    document.getElementById('result-candidate-label').textContent = 'Sheet processed';
+    document.getElementById('result-score-badge').textContent = `${pct}%`;
+
+    // Render answer cells
+    const grid = document.getElementById('result-answers-grid');
+    grid.innerHTML = '';
+    answers.forEach((ans, i) => {
+      const keyAns = key[i];
+      let cls = '';
+      if (ans === 'BLANK' || ans === 'DOUBLE') cls = 'flag';
+      else if (ans === keyAns) cls = 'correct';
+      else cls = 'wrong';
+
+      grid.innerHTML += `
+        <div class="result-answer-cell ${cls}">
+          <div class="result-answer-qnum">Q${i + 1}</div>
+          <div class="result-answer-letter">${ans === 'BLANK' ? '–' : ans === 'DOUBLE' ? '!!' : ans}</div>
+        </div>`;
+    });
+
+    // Flags
+    const flagsEl = document.getElementById('result-flags');
+    if (flagged) {
+      const blanks  = answers.map((a,i) => a === 'BLANK'  ? `Q${i+1}` : null).filter(Boolean);
+      const doubles = answers.map((a,i) => a === 'DOUBLE' ? `Q${i+1}` : null).filter(Boolean);
+      let msg = '⚠️ ';
+      if (doubles.length) msg += `Double-shaded: ${doubles.join(', ')}. `;
+      if (blanks.length)  msg += `No answer detected: ${blanks.join(', ')}.`;
+      msg += ' These score zero. Check and rescan if needed.';
+      flagsEl.textContent = msg;
+      flagsEl.classList.add('visible');
+    } else {
+      flagsEl.classList.remove('visible');
+    }
+
+    document.getElementById('result-answers-panel').style.opacity = '1';
+
+  } catch (err) {
+    console.error('Processing error:', err);
+    document.getElementById('result-processing').classList.add('hidden');
+    document.getElementById('result-candidate-label').textContent = 'Read failed';
+    showToast('Could not read sheet — try retaking', true);
+  }
+}
+
+function discardResult() {
+  document.getElementById('screen-result').classList.remove('active');
+  pendingResult = null;
+  // Return to camera
+}
+
+function confirmResult() {
+  if (!pendingResult) return;
+  // Store in session results
+  sessionResults.push({
+    dataUrl:    pendingResult.dataUrl,
+    answers:    pendingResult.answers,
+    score:      pendingResult.score,
+    correct:    pendingResult.correct,
+    qCount:     pendingResult.qCount,
+    flagged:    pendingResult.flagged,
+    timestamp:  Date.now(),
+  });
+  updateCamCounter();
+  pendingResult = null;
+  document.getElementById('screen-result').classList.remove('active');
+  showToast(`Sheet ${sessionResults.length} saved ✓`);
+}
+
+
 
 // ── Screen helpers ─────────────────────────────────────────────────
 function showCameraScreen() {
