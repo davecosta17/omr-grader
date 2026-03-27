@@ -537,9 +537,7 @@
     display: flex; align-items: center; justify-content: space-between;
   }
   .cam-ctrl-side {
-    width: 56px;
-    display: flex;
-    align-items: center; justify-content: center;
+    width: 56px; display: flex; align-items: center; justify-content: center;
   }
   .cam-flash-btn {
     width: 44px; height: 44px; border-radius: 50%;
@@ -1026,49 +1024,49 @@ function openDB() {
   });
 }
 
+function ensureDB() {
+  if (db) return Promise.resolve(db);
+  return openDB();
+}
+
 function dbGet(id) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).get(id);
+  return ensureDB().then(d => new Promise((resolve, reject) => {
+    const req = d.transaction(STORE, 'readonly').objectStore(STORE).get(id);
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+    req.onerror  = () => reject(req.error);
+  }));
 }
 
 function dbGetByName(name) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).index('name').get(name);
+  return ensureDB().then(d => new Promise((resolve, reject) => {
+    const req = d.transaction(STORE, 'readonly').objectStore(STORE).index('name').get(name);
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+    req.onerror  = () => reject(req.error);
+  }));
 }
 
 function dbPut(exam) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    const req = tx.objectStore(STORE).put(exam);
+  return ensureDB().then(d => new Promise((resolve, reject) => {
+    const req = d.transaction(STORE, 'readwrite').objectStore(STORE).put(exam);
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+    req.onerror  = () => reject(req.error);
+  }));
 }
 
 function dbDelete(id) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    const req = tx.objectStore(STORE).delete(id);
+  return ensureDB().then(d => new Promise((resolve, reject) => {
+    const req = d.transaction(STORE, 'readwrite').objectStore(STORE).delete(id);
     req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
+    req.onerror  = () => reject(req.error);
+  }));
 }
 
 function dbGetAll() {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).getAll();
+  return ensureDB().then(d => new Promise((resolve, reject) => {
+    const req = d.transaction(STORE, 'readonly').objectStore(STORE).getAll();
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+    req.onerror  = () => reject(req.error);
+  }));
 }
 
 // ── App State ────────────────────────────────────────────────────
@@ -1254,29 +1252,36 @@ function updateKeyProgress() {
 }
 
 // ── Question count change ─────────────────────────────────────────
-document.getElementById('exam-qcount').addEventListener('change', function() {
-  const val = parseInt(this.value);
-  const err = document.getElementById('qcount-error');
-  if (!val || val < 1 || val > 60) {
-    err.textContent = 'Enter a number between 1 and 60.';
-    err.classList.add('visible');
-    document.getElementById('key-section').style.display = 'none';
-    return;
-  }
-  err.classList.remove('visible');
-  buildKeyGrid(val, currentExam.answerKey || []);
+let qcountDebounce;
+document.getElementById('exam-qcount').addEventListener('input', function() {
+  clearTimeout(qcountDebounce);
+  qcountDebounce = setTimeout(() => {
+    const val = parseInt(this.value);
+    const err = document.getElementById('qcount-error');
+    if (!val || val < 1 || val > 60) {
+      if (this.value.trim() !== '') {
+        err.textContent = 'Enter a number between 1 and 60.';
+        err.classList.add('visible');
+      }
+      document.getElementById('key-section').style.display = 'none';
+      return;
+    }
+    err.classList.remove('visible');
+    buildKeyGrid(val, currentExam ? currentExam.answerKey : []);
+  }, 400);
 });
 
 // ── Save ──────────────────────────────────────────────────────────
 async function saveExam() {
-  const nameEl = document.getElementById('exam-name');
-  const qcountEl = document.getElementById('exam-qcount');
-  const nameErr = document.getElementById('name-error');
+  const nameEl    = document.getElementById('exam-name');
+  const qcountEl  = document.getElementById('exam-qcount');
+  const nameErr   = document.getElementById('name-error');
   const qcountErr = document.getElementById('qcount-error');
   let valid = true;
 
-  // Validate name
-  const name = nameEl.value.trim();
+  const name   = nameEl.value.trim();
+  const qcount = parseInt(qcountEl.value);
+
   if (!name) {
     nameErr.textContent = 'Please enter an exam name.';
     nameErr.classList.add('visible');
@@ -1285,8 +1290,6 @@ async function saveExam() {
     nameErr.classList.remove('visible');
   }
 
-  // Validate question count
-  const qcount = parseInt(qcountEl.value);
   if (!qcount || qcount < 1 || qcount > 60) {
     qcountErr.textContent = 'Enter a number between 1 and 60.';
     qcountErr.classList.add('visible');
@@ -1297,29 +1300,39 @@ async function saveExam() {
 
   if (!valid) return;
 
-  // Check unique name (ignore self when editing)
-  const existing = await dbGetByName(name);
-  if (existing && existing.id !== editingId) {
-    nameErr.textContent = 'An exam with this name already exists. Please use a different name.';
-    nameErr.classList.add('visible');
-    return;
+  try {
+    // Build the grid now if it hasn't been built yet
+    // (can happen on mobile if Save is tapped before qcount field loses focus)
+    if (!currentExam || !currentExam.answerKey || currentExam.questionCount !== qcount) {
+      buildKeyGrid(qcount, currentExam ? currentExam.answerKey : []);
+    }
+
+    // Check unique name
+    const existing = await dbGetByName(name);
+    if (existing && existing.id !== editingId) {
+      nameErr.textContent = 'An exam with this name already exists.';
+      nameErr.classList.add('visible');
+      return;
+    }
+
+    const exam = {
+      id:            editingId || generateUUID(),
+      name,
+      questionCount: qcount,
+      answerKey:     Array.from({ length: qcount }, (_, i) =>
+                       (currentExam.answerKey || [])[i] || null),
+      createdAt:     editingId ? (currentExam.createdAt || Date.now()) : Date.now(),
+      lastModified:  Date.now(),
+    };
+
+    await dbPut(exam);
+    showToast(editingId ? 'Exam updated ✓' : 'Exam saved ✓');
+    setTimeout(() => goHome(), 500);
+
+  } catch (err) {
+    console.error('saveExam error:', err);
+    showToast('Save failed: ' + (err.message || err), true);
   }
-
-  const exam = {
-    id: editingId || generateUUID(),
-    name,
-    questionCount: qcount,
-    answerKey: currentExam.answerKey || Array(qcount).fill(null),
-    createdAt: editingId ? currentExam.createdAt : Date.now(),
-    lastModified: Date.now(),
-  };
-
-  // Ensure answerKey length matches questionCount
-  exam.answerKey = Array.from({ length: qcount }, (_, i) => exam.answerKey[i] || null);
-
-  await dbPut(exam);
-  showToast(editingId ? 'Exam updated ✓' : 'Exam saved ✓');
-  setTimeout(() => goHome(), 500);
 }
 
 // ── Delete ────────────────────────────────────────────────────────
@@ -1931,8 +1944,9 @@ function hideCameraScreen() {
 }
 
 // ── Boot ──────────────────────────────────────────────────────────
-
-openDB().then(() => loadExamList());
+openDB()
+  .then(() => loadExamList())
+  .catch(err => showToast('Storage error: ' + (err.message || err), true));
 </script>
 </body>
 </html>
