@@ -12,12 +12,12 @@ function initEventListeners() {
     if (card) showExamActions(card.dataset.examId);
   });
 
-  // ── Create / Edit ────────────────────────────────────────────────
+  // ── Create / Edit ─────────────────────────────────────────────
   on('exam-qcount', 'input', handleQuestionCountInput);
   on('btn-save',    'click', saveExam);
   on('btn-delete',  'click', confirmDelete);
 
-  // ── Action sheet ─────────────────────────────────────────────────
+  // ── Action sheet ──────────────────────────────────────────────
   on('btn-action-grade',  'click', startGradingSession);
   on('btn-action-edit',   'click', editFromActionSheet);
   on('btn-action-delete', 'click', deleteFromActionSheet);
@@ -27,7 +27,7 @@ function initEventListeners() {
     if (e.target === $('action-sheet-overlay')) closeActionSheet();
   });
 
-  // ── Delete modal ──────────────────────────────────────────────────
+  // ── Delete modal ──────────────────────────────────────────────
   on('btn-delete-cancel',  'click', closeDeleteModal);
   on('btn-delete-confirm', 'click', deleteExam);
 
@@ -35,16 +35,17 @@ function initEventListeners() {
     if (e.target === $('delete-modal')) closeDeleteModal();
   });
 
-  // ── Camera ────────────────────────────────────────────────────────
+  // ── Camera ────────────────────────────────────────────────────
   on('btn-camera-back', 'click', stopCamera);
   on('cam-flash-btn',   'click', toggleFlash);
   on('cam-shutter',     'click', capturePhoto);
+  on('btn-cam-finish',  'click', finishSession);
 
-  // ── Preview ───────────────────────────────────────────────────────
+  // ── Preview ───────────────────────────────────────────────────
   on('btn-preview-retake', 'click', retakePhoto);
   on('btn-preview-use',    'click', usePhoto);
 
-  // ── Result ────────────────────────────────────────────────────────
+  // ── Result ────────────────────────────────────────────────────
   on('btn-result-back',    'click', discardResult);
   on('btn-result-discard', 'click', discardResult);
   on('btn-result-confirm', 'click', confirmResult);
@@ -59,7 +60,7 @@ function registerServiceWorker() {
   }
 }
 
-// ── Boot ──────────────────────────────────────────────────────────
+// ── Boot ─────────────────────────────────────────────────────────
 initEventListeners();
 registerServiceWorker();
 openDB()

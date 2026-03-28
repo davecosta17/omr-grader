@@ -1,18 +1,20 @@
 // results.js — result screen after a sheet is processed
 // Depends on: dom.js, omr.js
-// Note: sessionResults and updateCamCounter live in camera.js and are
-// available at call-time since camera.js loads after results.js.
+// Cross-file globals from camera.js: gradingExam, sessionResults,
+//   updateCamCounter, updateFinishBtn
+// Cross-file globals from omr.js:    processSheet, GES_TEMPLATE, drawDebugOverlay,
+//   renderResultAnswers, buildResultFlagsMessage
 
 let pendingResult = null;
 
 async function showResultScreen(dataUrl) {
-  const resultScreen  = $('screen-result');
-  const processing    = $('result-processing');
-  const answersPanel  = $('result-answers-panel');
+  const resultScreen   = $('screen-result');
+  const processing     = $('result-processing');
+  const answersPanel   = $('result-answers-panel');
   const candidateLabel = $('result-candidate-label');
-  const scoreBadge    = $('result-score-badge');
-  const answersGrid   = $('result-answers-grid');
-  const flagsEl       = $('result-flags');
+  const scoreBadge     = $('result-score-badge');
+  const answersGrid    = $('result-answers-grid');
+  const flagsEl        = $('result-flags');
 
   resultScreen.classList.add('active');
   processing.classList.remove('hidden');
@@ -73,7 +75,6 @@ function discardResult() {
 function confirmResult() {
   if (!pendingResult) return;
 
-  // sessionResults and updateCamCounter are defined in camera.js
   sessionResults.push({
     dataUrl:   pendingResult.dataUrl,
     answers:   pendingResult.answers,
@@ -85,6 +86,7 @@ function confirmResult() {
   });
 
   updateCamCounter();
+  updateFinishBtn();   // show "Finish & Review" once first sheet is saved
   pendingResult = null;
   $('screen-result').classList.remove('active');
   showToast(`Sheet ${sessionResults.length} saved ✓`);

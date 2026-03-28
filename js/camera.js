@@ -1,35 +1,61 @@
-// camera.js — camera, capture, and preview
+// camera.js — camera, capture, preview, and session management
 // Result screen logic lives in results.js
 
-let gradingExam   = null;
+let gradingExam    = null;
 let sessionResults = [];
 let capturedDataUrl = null;
-let cameraStream  = null;
-let torchOn       = false;
-let guideRect     = null;
+let cameraStream   = null;
+let torchOn        = false;
+let guideRect      = null;
 
 // ── Session ───────────────────────────────────────────────────────
 
 async function startGradingSession() {
   const id = actionSheetExamId;
   closeActionSheet();
-  const exam = await dbGet(id);
-  if (!exam) return;
 
-  gradingExam    = exam;
-  sessionResults = [];
-  capturedDataUrl = null;
+  try {
+    const exam = await dbGet(id);
+    if (!exam) return;
 
-  $('cam-exam-name').textContent = exam.name;
-  $('cam-exam-sub').textContent  = `${exam.questionCount} questions`;
-  updateCamCounter();
+    gradingExam     = exam;
+    sessionResults  = [];
+    capturedDataUrl = null;
 
-  showCameraScreen();
-  await initCamera();
+    $('cam-exam-name').textContent = exam.name;
+    $('cam-exam-sub').textContent  = `${exam.questionCount} questions`;
+    updateCamCounter();
+    updateFinishBtn();
+
+    showCameraScreen();
+    await initCamera();
+  } catch (err) {
+    console.error('startGradingSession error:', err);
+    showToast('Could not start session: ' + (err.message || err), true);
+  }
 }
 
 function updateCamCounter() {
-  $('cam-counter').textContent = `${sessionResults.length} scanned`;
+  const n = sessionResults.length;
+  $('cam-counter').textContent = `${n} scanned`;
+}
+
+// Show the "Finish & Review" button once at least one sheet is scanned
+function updateFinishBtn() {
+  const btn = $('btn-cam-finish');
+  if (sessionResults.length > 0) {
+    btn.classList.add('visible');
+  } else {
+    btn.classList.remove('visible');
+  }
+}
+
+function finishSession() {
+  // Stop camera, then show the session summary (M5 will build this properly)
+  // For now, go back home and report how many were scanned
+  stopCamera();
+  showToast(`Session complete — ${sessionResults.length} sheet${sessionResults.length !== 1 ? 's' : ''} scanned`);
+  // M5 hook: showSessionSummary(sessionResults, gradingExam) goes here
 }
 
 // ── Camera init / teardown ────────────────────────────────────────
@@ -67,17 +93,18 @@ function stopCamera() {
   torchOn = false;
   $('cam-flash-btn').classList.remove('on');
   $('cam-thumb').innerHTML = '📄';
-  sessionResults  = [];
-  gradingExam     = null;
+  $('btn-cam-finish').classList.remove('visible');
   hideCameraScreen();
+  // Note: we intentionally keep sessionResults and gradingExam alive
+  // so M5 can read them after the camera closes
 }
 
 // ── Guide overlay ─────────────────────────────────────────────────
 
 function positionGuide() {
-  const vp   = $('cam-viewport');
-  const vpW  = vp.clientWidth;
-  const vpH  = vp.clientHeight;
+  const vp  = $('cam-viewport');
+  const vpW = vp.clientWidth;
+  const vpH = vp.clientHeight;
 
   const guideW = Math.round(vpW * 0.88);
   const guideH = Math.round(guideW * 1.35);
@@ -149,17 +176,17 @@ function capturePhoto() {
   flashEl.classList.add('flash');
   setTimeout(() => flashEl.classList.remove('flash'), 120);
 
-  // Draw full video frame
+  // Draw full video frame to hidden canvas
   const vw = video.videoWidth  || 1280;
   const vh = video.videoHeight || 720;
   canvas.width  = vw;
   canvas.height = vh;
   canvas.getContext('2d').drawImage(video, 0, 0, vw, vh);
 
-  // Map guide rect from viewport pixels to video pixels
-  const vp        = $('cam-viewport');
-  const vpW       = vp.clientWidth;
-  const vpH       = vp.clientHeight;
+  // Map guide rect from viewport pixels → video pixels
+  const vp          = $('cam-viewport');
+  const vpW         = vp.clientWidth;
+  const vpH         = vp.clientHeight;
   const videoAspect = vw / vh;
   const vpAspect    = vpW / vpH;
   let dispW, dispH, offsetX, offsetY;
@@ -203,7 +230,7 @@ function hidePreviewScreen() {
 
 function retakePhoto() {
   hidePreviewScreen();
-  // Camera stream stays running — just returns to the live viewfinder
+  // Camera stays running — returns to live viewfinder
 }
 
 function usePhoto() {
@@ -217,7 +244,7 @@ function usePhoto() {
 
 function showCameraScreen() {
   $('screen-camera').classList.add('active');
-  // Position guide immediately so it shows even if camera hasn't loaded yet
+  // Position guide immediately — even before camera loads
   requestAnimationFrame(() => positionGuide());
 }
 

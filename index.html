@@ -3,11 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#1a3a2a">
+<meta name="theme-color" content="#000080">
+<meta name="description" content="Ghost Tech OMR — scan and grade GES answer sheets instantly">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Ghost Tech OMR Grader</title>
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Ghost Tech OMR</title>
+<!-- Fonts: preconnect for speed, display=swap so text shows immediately with fallback font -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -41,7 +47,7 @@
   <div class="section-label">Saved Exams</div>
   <div class="exam-list" id="exam-list">
     <div class="empty-state">
-      <div class="empty-state-icon">&#128203;</div>
+      <div class="empty-state-icon">📋</div>
       <div class="empty-state-title">No exams yet</div>
       <div class="empty-state-sub">Tap <strong>Create New Exam</strong> to add your first answer key</div>
     </div>
@@ -57,14 +63,23 @@
 
       <div class="field">
         <label for="exam-name">Exam Name</label>
-        <input type="text" id="exam-name" placeholder="e.g. Science Mock 2025 &ndash; Form 2" maxlength="80" autocomplete="off">
-        <div class="field-hint">Must be unique. You'll use this name to load the exam later.</div>
+        <input type="text" id="exam-name"
+               placeholder="e.g. Science Mock 2025 – Form 2"
+               maxlength="80"
+               autocomplete="off"
+               autocapitalize="words"
+               spellcheck="false">
+        <div class="field-hint">Must be unique. You&rsquo;ll use this name to load the exam later.</div>
         <div class="field-error" id="name-error"></div>
       </div>
 
       <div class="field">
         <label for="exam-qcount">Number of Questions</label>
-        <input type="number" id="exam-qcount" placeholder="e.g. 40" min="1" max="60">
+        <input type="number" id="exam-qcount"
+               placeholder="e.g. 40"
+               min="1" max="60"
+               inputmode="numeric"
+               pattern="[0-9]*">
         <div class="field-hint">Between 1 and 60. You can change this before saving.</div>
         <div class="field-error" id="qcount-error"></div>
       </div>
@@ -86,7 +101,6 @@
 
   </div>
 
-  <!-- Bottom Actions -->
   <div class="bottom-actions" id="create-actions">
     <button class="btn-secondary btn-danger" id="btn-delete" style="display:none">Delete</button>
     <button class="btn-save" id="btn-save">Save Exam</button>
@@ -99,28 +113,28 @@
     <div class="action-sheet-handle"></div>
     <div class="action-sheet-exam-name" id="action-sheet-name"></div>
     <button class="action-sheet-btn grade" id="btn-action-grade">
-      <div class="action-sheet-btn-icon">&#128247;</div>
+      <div class="action-sheet-btn-icon">📷</div>
       <div class="action-sheet-btn-label">
         <div>Start Grading</div>
         <div class="action-sheet-btn-sub">Open camera to scan answer sheets</div>
       </div>
     </button>
     <button class="action-sheet-btn edit" id="btn-action-edit">
-      <div class="action-sheet-btn-icon">&#9998;</div>
+      <div class="action-sheet-btn-icon">✏️</div>
       <div class="action-sheet-btn-label">
         <div>Edit Answer Key</div>
         <div class="action-sheet-btn-sub">Modify exam name or answers</div>
       </div>
     </button>
     <button class="action-sheet-btn delete" id="btn-action-delete">
-      <div class="action-sheet-btn-icon">&#128465;</div>
+      <div class="action-sheet-btn-icon">🗑️</div>
       <div class="action-sheet-btn-label">
         <div>Delete Exam</div>
         <div class="action-sheet-btn-sub">Permanently remove this exam</div>
       </div>
     </button>
     <button class="action-sheet-btn cancel" id="btn-action-cancel">
-      <div class="action-sheet-btn-icon">&#10005;</div>
+      <div class="action-sheet-btn-icon">✕</div>
       <div class="action-sheet-btn-label">Cancel</div>
     </button>
   </div>
@@ -128,7 +142,6 @@
 
 <!-- CAMERA SCREEN -->
 <div class="screen" id="screen-camera">
-  <!-- Top bar -->
   <div class="cam-topbar">
     <button class="cam-back-btn" id="btn-camera-back">&#8592;</button>
     <div class="cam-exam-info">
@@ -138,51 +151,48 @@
     <div class="cam-counter" id="cam-counter">0 scanned</div>
   </div>
 
-  <!-- Viewport -->
   <div class="cam-viewport" id="cam-viewport">
     <video id="cam-video" autoplay playsinline muted></video>
 
-    <!-- Overlay panels (positioned by JS) -->
     <div class="cam-overlay" id="cam-overlay">
       <div class="cam-overlay-panel" id="ovl-top"></div>
       <div class="cam-overlay-panel" id="ovl-bottom"></div>
       <div class="cam-overlay-panel" id="ovl-left"></div>
       <div class="cam-overlay-panel" id="ovl-right"></div>
-      <!-- Corner brackets -->
       <div class="cam-corner tl" id="corner-tl"></div>
       <div class="cam-corner tr" id="corner-tr"></div>
       <div class="cam-corner bl" id="corner-bl"></div>
       <div class="cam-corner br" id="corner-br"></div>
-      <!-- Guide label -->
       <div class="cam-guide-label" id="cam-guide-label">Align sheet within the frame</div>
+    <button class="cam-finish-btn" id="btn-cam-finish" title="Finish session">
+      ✓ Finish &amp; Review
+    </button>
     </div>
 
-    <!-- Flash effect -->
     <div class="cam-flash" id="cam-flash"></div>
 
-    <!-- Permission error -->
     <div class="cam-error" id="cam-error">
-      <div class="cam-error-icon">&#128274;</div>
+      <div class="cam-error-icon">🔒</div>
       <div class="cam-error-title">HTTPS Required for Camera</div>
       <div class="cam-error-sub">
         Your browser blocks camera access on plain HTTP local addresses.<br><br>
         <strong>Quick fix on Android Chrome:</strong><br>
-        Go to <code style="background:rgba(255,255,255,0.15);padding:2px 6px;border-radius:4px">chrome://flags</code>, search for <em>"Insecure origins"</em>, paste your server address (e.g. <code style="background:rgba(255,255,255,0.15);padding:2px 6px;border-radius:4px">http://192.168.1.138:3000</code>), enable it, and relaunch Chrome.<br><br>
+        Go to <code style="background:rgba(255,255,255,0.15);padding:2px 6px;border-radius:4px">chrome://flags</code>,
+        search for <em>&ldquo;Insecure origins&rdquo;</em>, paste your server address, enable it, and relaunch Chrome.<br><br>
         Or serve the app over HTTPS using a tool like <strong>ngrok</strong>.
       </div>
     </div>
   </div>
 
-  <!-- Controls -->
   <div class="cam-controls">
     <div class="cam-ctrl-side">
-      <button class="cam-flash-btn" id="cam-flash-btn" title="Toggle flash">&#9889;</button>
+      <button class="cam-flash-btn" id="cam-flash-btn" title="Toggle flash">⚡</button>
     </div>
     <button class="cam-shutter" id="cam-shutter">
       <div class="cam-shutter-inner"></div>
     </button>
     <div class="cam-ctrl-side">
-      <div class="cam-thumb" id="cam-thumb">&#128196;</div>
+      <div class="cam-thumb" id="cam-thumb">📄</div>
     </div>
   </div>
 
@@ -203,7 +213,6 @@
   </div>
 </div>
 
-
 <!-- RESULT SCREEN -->
 <div class="screen" id="screen-result">
   <div class="result-topbar">
@@ -215,7 +224,6 @@
     <div class="result-score-badge" id="result-score-badge">&mdash;</div>
   </div>
 
-  <!-- Debug image with bubble overlay -->
   <div class="result-img-wrap">
     <canvas id="result-canvas"></canvas>
     <div class="result-processing" id="result-processing">
@@ -224,7 +232,6 @@
     </div>
   </div>
 
-  <!-- Detected answers grid -->
   <div class="result-answers-panel" id="result-answers-panel">
     <div class="result-answers-title">Detected Answers</div>
     <div class="result-answers-grid" id="result-answers-grid"></div>
@@ -237,6 +244,8 @@
   </div>
 </div>
 
+<!-- DELETE MODAL -->
+<div class="modal-overlay" id="delete-modal">
   <div class="modal">
     <div class="modal-title">Delete Exam?</div>
     <div class="modal-body">
@@ -257,6 +266,7 @@
 <script src="js/store.js"></script>
 <script src="js/omr.js"></script>
 <script src="js/exams.js"></script>
+<script src="js/results.js"></script>
 <script src="js/camera.js"></script>
 <script src="js/app.js"></script>
 </body>
