@@ -3,7 +3,7 @@
 // Strategy: Cache-first for static assets, network-first is not needed
 // since all data lives in IndexedDB on the device.
 
-const CACHE_NAME = 'ghost-omr-v1';
+const CACHE_NAME = 'ghost-omr-v2';
 
 // All files that make up the app shell.
 // Update CACHE_NAME above whenever you deploy new versions

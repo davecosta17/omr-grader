@@ -1,6 +1,6 @@
 {
-  "name": "Ghost Tech OMR",
-  "short_name": "OMR",
+  "name": "Ghost Tech Objective Sheet Grader",
+  "short_name": "GT OBJ Grader",
   "description": "Scan and grade shading answer sheets instantly",
   "start_url": "./",
   "display": "standalone",

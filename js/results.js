@@ -19,8 +19,12 @@ async function showResultScreen(dataUrl) {
   scoreBadge.textContent     = '—';
 
   try {
-    const qCount          = gradingExam.questionCount;
+    const qCount           = gradingExam.questionCount;
     const computedTemplate = gradingExam.computedTemplate;
+
+    if (!computedTemplate) {
+      throw new Error('No template for this exam. Edit the exam and select a template.');
+    }
 
     const { answers, bubbleMap, width, height } =
       await processSheet(dataUrl, computedTemplate, qCount);

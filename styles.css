@@ -105,9 +105,8 @@ body {
 /* Camera & preview & result screens go full-screen (over the topbar too) */
 #screen-camera,
 #screen-preview,
-#screen-result,
-#screen-calibration {
-  top: 0;       /* cover topbar as well */
+#screen-result {
+  top: 0;
   z-index: 150;
   background: #000;
   overflow: hidden;
@@ -671,12 +670,17 @@ body {
 .btn-change-template:active { background: var(--lav-dark); }
 
 /* ── CALIBRATION SCREEN ────────────────────── */
+/* Standalone fixed rule — does NOT rely on the .screen base class */
 #screen-calibration {
-  background: #111 !important;
-  z-index: 180 !important;  /* must be above camera z-index:150 */
-  overflow-y: auto !important;
+  display: none;
+  flex-direction: column;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #111;
+  z-index: 200;     /* above everything: topbar(100), camera(150), result(160) */
+  overflow: hidden;
 }
-#screen-calibration.active { display: flex !important; }
+#screen-calibration.active { display: flex; }
 
 .calib-topbar {
   background: var(--navy); color: #fff;
@@ -755,3 +759,13 @@ body {
 /* ── RESET MODAL ───────────────────────────── */
 /* Reuses .modal-overlay and .modal styles */
 #reset-modal .modal-title { color: var(--red); }
+
+/* ── FOOTER ────────────────────────────────── */
+.app-footer {
+  text-align: center;
+  padding: 20px 16px 32px;
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+}

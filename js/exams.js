@@ -127,13 +127,14 @@ function handleTemplatePickerClick(e) {
 
 function startCalibrateFromPicker() {
   closeTemplatePicker();
-  // Set callback: after calibration save, select that template and show exam form
+  // After calibration saves, select the new template and open the exam form.
+  // Note: camera is already stopped inside usePhoto() before the calibration
+  // screen appears, so we do NOT call stopCamera() here.
   calibOnSave = (templateId, template) => {
     pendingTemplate = template;
-    stopCamera();            // defined in camera.js
     showExamCreateForm();
   };
-  startCalibrationCapture(); // defined in camera.js
+  startCalibrationCapture(); // camera.js
 }
 
 // ── Create / Edit screen ──────────────────────────────────────────
