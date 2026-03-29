@@ -61,6 +61,15 @@
     <div class="form-section">
       <div class="form-section-title">Exam Details</div>
 
+      <div class="field" id="template-field">
+        <label>Sheet Template</label>
+        <div class="template-display">
+          <span id="template-display-name">No template selected</span>
+          <span class="template-global-badge" id="template-display-badge" style="display:none">Global</span>
+          <button class="btn-change-template" id="btn-change-template" type="button">Change</button>
+        </div>
+      </div>
+
       <div class="field">
         <label for="exam-name">Exam Name</label>
         <input type="text" id="exam-name"
@@ -244,6 +253,66 @@
   </div>
 </div>
 
+<!-- TEMPLATE PICKER MODAL -->
+<div class="action-sheet-overlay" id="template-picker-overlay">
+  <div class="action-sheet">
+    <div class="action-sheet-handle"></div>
+    <div class="action-sheet-exam-name">Select Sheet Template</div>
+    <div class="template-picker-list" id="template-picker-list">
+      <!-- rendered by JS -->
+    </div>
+    <button class="action-sheet-btn grade" id="btn-template-calibrate">
+      <div class="action-sheet-btn-icon">📐</div>
+      <div class="action-sheet-btn-label">
+        <div>Calibrate New Sheet</div>
+        <div class="action-sheet-btn-sub">Photograph a blank answer sheet</div>
+      </div>
+    </button>
+    <button class="action-sheet-btn cancel" id="btn-template-cancel">
+      <div class="action-sheet-btn-icon">✕</div>
+      <div class="action-sheet-btn-label">Cancel</div>
+    </button>
+  </div>
+</div>
+
+<!-- CALIBRATION SCREEN -->
+<div class="screen" id="screen-calibration">
+  <div class="calib-topbar">
+    <button class="cam-back-btn" id="btn-calib-cancel">&#8592;</button>
+    <div class="calib-topbar-info">
+      <div class="calib-topbar-title">Calibrate Sheet</div>
+      <div class="calib-topbar-sub">Drag each handle to the centre of that bubble</div>
+    </div>
+  </div>
+
+  <div class="calib-workspace" id="calib-workspace">
+    <canvas id="calib-canvas"></canvas>
+  </div>
+
+  <div class="calib-bottom-panel">
+    <div class="field">
+      <label for="calib-name">Template Name</label>
+      <input type="text" id="calib-name"
+             placeholder="e.g. GES Standard — School Printer"
+             autocapitalize="words" spellcheck="false">
+    </div>
+    <div class="calib-global-row">
+      <div>
+        <div class="calib-global-title">Global template</div>
+        <div class="calib-global-sub">Available for all exams on this device</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="calib-global">
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+    <div class="calib-actions">
+      <button class="btn-secondary" id="btn-calib-cancel-bottom" onclick="document.getElementById('btn-calib-cancel').click()">Cancel</button>
+      <button class="btn-save" id="btn-calib-save">Save Template</button>
+    </div>
+  </div>
+</div>
+
 <!-- DELETE MODAL -->
 <div class="modal-overlay" id="delete-modal">
   <div class="modal">
@@ -265,6 +334,7 @@
 <script src="js/dom.js"></script>
 <script src="js/store.js"></script>
 <script src="js/omr.js"></script>
+<script src="js/calibration.js"></script>
 <script src="js/exams.js"></script>
 <script src="js/results.js"></script>
 <script src="js/camera.js"></script>

@@ -1,9 +1,5 @@
 // results.js — result screen after a sheet is processed
-// Depends on: dom.js, omr.js
-// Cross-file globals from camera.js: gradingExam, sessionResults,
-//   updateCamCounter, updateFinishBtn
-// Cross-file globals from omr.js:    processSheet, GES_TEMPLATE, drawDebugOverlay,
-//   renderResultAnswers, buildResultFlagsMessage
+// Uses gradingExam.computedTemplate set by camera.js
 
 let pendingResult = null;
 
@@ -23,8 +19,11 @@ async function showResultScreen(dataUrl) {
   scoreBadge.textContent     = '—';
 
   try {
-    const qCount = gradingExam.questionCount;
-    const { answers, bubbleMap, width, height } = await processSheet(dataUrl, GES_TEMPLATE, qCount);
+    const qCount          = gradingExam.questionCount;
+    const computedTemplate = gradingExam.computedTemplate;
+
+    const { answers, bubbleMap, width, height } =
+      await processSheet(dataUrl, computedTemplate, qCount);
 
     const key = gradingExam.answerKey;
     let correct = 0;
@@ -33,17 +32,9 @@ async function showResultScreen(dataUrl) {
     const flagged = answers.some(a => a === 'BLANK' || a === 'DOUBLE');
     const pct     = Math.round((correct / qCount) * 100);
 
-    pendingResult = {
-      dataUrl,
-      answers,
-      bubbleMap,
-      score:   `${correct}/${qCount}`,
-      correct,
-      qCount,
-      flagged,
-    };
+    pendingResult = { dataUrl, answers, bubbleMap, score: `${correct}/${qCount}`, correct, qCount, flagged };
 
-    await drawDebugOverlay(dataUrl, bubbleMap, width, height);
+    await drawDebugOverlay(dataUrl, bubbleMap, width, height, computedTemplate);
 
     processing.classList.add('hidden');
     candidateLabel.textContent = 'Sheet processed';
@@ -74,7 +65,6 @@ function discardResult() {
 
 function confirmResult() {
   if (!pendingResult) return;
-
   sessionResults.push({
     dataUrl:   pendingResult.dataUrl,
     answers:   pendingResult.answers,
@@ -84,9 +74,8 @@ function confirmResult() {
     flagged:   pendingResult.flagged,
     timestamp: Date.now(),
   });
-
   updateCamCounter();
-  updateFinishBtn();   // show "Finish & Review" once first sheet is saved
+  updateFinishBtn();
   pendingResult = null;
   $('screen-result').classList.remove('active');
   showToast(`Sheet ${sessionResults.length} saved ✓`);

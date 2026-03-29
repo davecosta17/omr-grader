@@ -2,20 +2,30 @@
 
 function initEventListeners() {
 
-  // ── Home ────────────────────────────────────────────────────────
+  // ── Home ──────────────────────────────────────────────────────
   on('btn-create-exam', 'click', showCreateScreen);
   on('topbar-back',     'click', goHome);
 
-  // Exam list uses event delegation (cards are dynamically rendered)
   $('exam-list').addEventListener('click', e => {
     const card = e.target.closest('.exam-card[data-exam-id]');
     if (card) showExamActions(card.dataset.examId);
+  });
+
+  // ── Template picker ───────────────────────────────────────────
+  on('btn-template-calibrate', 'click', startCalibrateFromPicker);
+  on('btn-template-cancel',    'click', closeTemplatePicker);
+
+  $('template-picker-list').addEventListener('click', handleTemplatePickerClick);
+
+  $('template-picker-overlay').addEventListener('click', e => {
+    if (e.target === $('template-picker-overlay')) closeTemplatePicker();
   });
 
   // ── Create / Edit ─────────────────────────────────────────────
   on('exam-qcount', 'input', handleQuestionCountInput);
   on('btn-save',    'click', saveExam);
   on('btn-delete',  'click', confirmDelete);
+  on('btn-change-template', 'click', showTemplatePicker);
 
   // ── Action sheet ──────────────────────────────────────────────
   on('btn-action-grade',  'click', startGradingSession);
@@ -49,9 +59,15 @@ function initEventListeners() {
   on('btn-result-back',    'click', discardResult);
   on('btn-result-discard', 'click', discardResult);
   on('btn-result-confirm', 'click', confirmResult);
+
+  // ── Calibration ───────────────────────────────────────────────
+  on('btn-calib-save',   'click', saveCalibration);
+  on('btn-calib-cancel', 'click', () => {
+    hideCalibrationScreen();
+    stopCamera();
+  });
 }
 
-// ── Service Worker registration ───────────────────────────────────
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js')
@@ -62,6 +78,7 @@ function registerServiceWorker() {
 
 // ── Boot ─────────────────────────────────────────────────────────
 initEventListeners();
+initCalibration();     // calibration.js — sets up pointer events
 registerServiceWorker();
 openDB()
   .then(() => loadExamList())

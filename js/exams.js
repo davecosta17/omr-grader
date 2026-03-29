@@ -1,7 +1,10 @@
+// exams.js — exam CRUD, answer key grid, and template picker
+
 let currentExam       = null;
 let editingId         = null;
 let pendingDeleteId   = null;
 let actionSheetExamId = null;
+let pendingTemplate   = null;   // template selected for the exam being created
 
 // ── Screen navigation ─────────────────────────────────────────────
 
@@ -62,9 +65,85 @@ async function loadExamList() {
   }
 }
 
+// ── Template picker ───────────────────────────────────────────────
+
+async function showTemplatePicker() {
+  try {
+    const templates = await dbGetAllTemplates();
+
+    // Sort: globals first, then by name
+    templates.sort((a, b) => {
+      if (a.isGlobal !== b.isGlobal) return a.isGlobal ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    const list = $('template-picker-list');
+
+    if (!templates.length) {
+      list.innerHTML = `
+        <div class="template-empty">
+          <div class="template-empty-icon">📐</div>
+          <div class="template-empty-title">No templates yet</div>
+          <div class="template-empty-sub">Calibrate your sheet to get started</div>
+        </div>`;
+    } else {
+      list.innerHTML = templates.map(t => `
+        <div class="template-item${pendingTemplate && pendingTemplate.id === t.id ? ' selected' : ''}"
+             data-template-id="${t.id}">
+          <div class="template-item-icon">📄</div>
+          <div class="template-item-info">
+            <div class="template-item-name">${escHtml(t.name)}</div>
+            <div class="template-item-meta">
+              ${t.isGlobal ? '<span class="template-global-badge">Global</span>' : ''}
+              Calibrated ${new Date(t.createdAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' })}
+            </div>
+          </div>
+          ${pendingTemplate && pendingTemplate.id === t.id ? '<div class="template-item-check">✓</div>' : ''}
+        </div>`).join('');
+    }
+
+    $('template-picker-overlay').classList.add('visible');
+  } catch (err) {
+    console.error('showTemplatePicker error:', err);
+    showToast('Could not load templates: ' + (err.message || err), true);
+  }
+}
+
+function closeTemplatePicker() {
+  $('template-picker-overlay').classList.remove('visible');
+}
+
+function handleTemplatePickerClick(e) {
+  const item = e.target.closest('.template-item[data-template-id]');
+  if (!item) return;
+  const id = item.dataset.templateId;
+  dbGetTemplate(id).then(template => {
+    if (!template) return;
+    pendingTemplate = template;
+    closeTemplatePicker();
+    showExamCreateForm();
+  }).catch(err => showToast('Error: ' + err.message, true));
+}
+
+function startCalibrateFromPicker() {
+  closeTemplatePicker();
+  // Set callback: after calibration save, select that template and show exam form
+  calibOnSave = (templateId, template) => {
+    pendingTemplate = template;
+    stopCamera();            // defined in camera.js
+    showExamCreateForm();
+  };
+  startCalibrationCapture(); // defined in camera.js
+}
+
 // ── Create / Edit screen ──────────────────────────────────────────
 
 function showCreateScreen() {
+  pendingTemplate = null;
+  showTemplatePicker();
+}
+
+function showExamCreateForm() {
   editingId   = null;
   currentExam = { answerKey: [] };
   $('exam-name').value   = '';
@@ -76,6 +155,7 @@ function showCreateScreen() {
   hide($('btn-delete'));
   $('topbar-back').classList.add('visible');
   hide($('topbar-logo'));
+  updateTemplateDisplay();
   showScreen('create');
 }
 
@@ -85,6 +165,14 @@ async function showEditScreen(id) {
     if (!exam) return;
     editingId   = id;
     currentExam = JSON.parse(JSON.stringify(exam));
+
+    // Load the exam's linked template
+    if (exam.templateId) {
+      pendingTemplate = await dbGetTemplate(exam.templateId) || null;
+    } else {
+      pendingTemplate = null;
+    }
+
     $('exam-name').value   = exam.name;
     $('exam-qcount').value = exam.questionCount;
     $('name-error').classList.remove('visible');
@@ -92,11 +180,24 @@ async function showEditScreen(id) {
     show($('btn-delete'), 'flex');
     $('topbar-back').classList.add('visible');
     hide($('topbar-logo'));
+    updateTemplateDisplay();
     buildKeyGrid(exam.questionCount, exam.answerKey);
     showScreen('create');
   } catch (err) {
     console.error('showEditScreen error:', err);
     showToast('Could not open exam: ' + (err.message || err), true);
+  }
+}
+
+function updateTemplateDisplay() {
+  const nameEl  = $('template-display-name');
+  const badgeEl = $('template-display-badge');
+  if (pendingTemplate) {
+    nameEl.textContent  = pendingTemplate.name;
+    badgeEl.style.display = pendingTemplate.isGlobal ? 'inline-flex' : 'none';
+  } else {
+    nameEl.textContent    = 'No template selected';
+    badgeEl.style.display = 'none';
   }
 }
 
@@ -116,30 +217,24 @@ function buildKeyGrid(count, existingKey = []) {
     row.id = `key-row-${i}`;
 
     const qnum = document.createElement('div');
-    qnum.className   = 'key-qnum';
-    qnum.textContent = i + 1;
+    qnum.className = 'key-qnum'; qnum.textContent = i + 1;
 
     const opts = document.createElement('div');
     opts.className = 'key-options';
-
-    ['A', 'B', 'C', 'D'].forEach(letter => {
+    ['A','B','C','D'].forEach(letter => {
       const btn = document.createElement('button');
       btn.className   = 'key-opt' + (currentExam.answerKey[i] === letter ? ` selected-${letter}` : '');
       btn.textContent = letter;
-      btn.dataset.q   = i;
-      btn.dataset.l   = letter;
+      btn.dataset.q   = i; btn.dataset.l = letter;
       btn.onclick     = () => selectAnswer(i, letter);
       opts.appendChild(btn);
     });
 
     const status = document.createElement('div');
-    status.className   = 'key-status';
-    status.id          = `key-status-${i}`;
+    status.className = 'key-status'; status.id = `key-status-${i}`;
     status.textContent = currentExam.answerKey[i] ? '✓' : '';
 
-    row.appendChild(qnum);
-    row.appendChild(opts);
-    row.appendChild(status);
+    row.appendChild(qnum); row.appendChild(opts); row.appendChild(status);
     grid.appendChild(row);
   }
 
@@ -148,8 +243,7 @@ function buildKeyGrid(count, existingKey = []) {
 }
 
 function selectAnswer(qIndex, letter) {
-  const prev   = currentExam.answerKey[qIndex];
-  const newVal = prev === letter ? null : letter;
+  const newVal = currentExam.answerKey[qIndex] === letter ? null : letter;
   currentExam.answerKey[qIndex] = newVal;
 
   const row = $(`key-row-${qIndex}`);
@@ -223,18 +317,17 @@ async function saveExam() {
 
   if (!name) {
     nameErr.textContent = 'Please enter an exam name.';
-    nameErr.classList.add('visible');
-    valid = false;
-  } else {
-    nameErr.classList.remove('visible');
-  }
+    nameErr.classList.add('visible'); valid = false;
+  } else { nameErr.classList.remove('visible'); }
 
   if (!qcount || qcount < 1 || qcount > 60) {
     qcountErr.textContent = 'Enter a number between 1 and 60.';
-    qcountErr.classList.add('visible');
-    valid = false;
-  } else {
-    qcountErr.classList.remove('visible');
+    qcountErr.classList.add('visible'); valid = false;
+  } else { qcountErr.classList.remove('visible'); }
+
+  if (!pendingTemplate) {
+    showToast('Please select or calibrate a sheet template first', true);
+    return;
   }
 
   if (!valid) return;
@@ -247,8 +340,7 @@ async function saveExam() {
     const existing = await dbGetByName(name);
     if (existing && existing.id !== editingId) {
       nameErr.textContent = 'An exam with this name already exists.';
-      nameErr.classList.add('visible');
-      return;
+      nameErr.classList.add('visible'); return;
     }
 
     const exam = {
@@ -256,6 +348,7 @@ async function saveExam() {
       name,
       questionCount: qcount,
       answerKey:     Array.from({ length: qcount }, (_, i) => (currentExam.answerKey || [])[i] || null),
+      templateId:    pendingTemplate.id,
       createdAt:     editingId ? (currentExam.createdAt || Date.now()) : Date.now(),
       lastModified:  Date.now(),
     };
@@ -263,14 +356,13 @@ async function saveExam() {
     await dbPut(exam);
     showToast(editingId ? 'Exam updated ✓' : 'Exam saved ✓');
     setTimeout(() => goHome(), 500);
-
   } catch (err) {
     console.error('saveExam error:', err);
     showToast('Save failed: ' + (err.message || err), true);
   }
 }
 
-// ── Delete (from Edit screen) ─────────────────────────────────────
+// ── Delete ────────────────────────────────────────────────────────
 
 function confirmDelete() {
   if (!editingId) return;

@@ -1,5 +1,6 @@
-// camera.js — camera, capture, preview, and session management
+// camera.js — camera hardware, capture, preview, and session management
 // Result screen logic lives in results.js
+// Calibration screen logic lives in calibration.js
 
 let gradingExam    = null;
 let sessionResults = [];
@@ -7,8 +8,9 @@ let capturedDataUrl = null;
 let cameraStream   = null;
 let torchOn        = false;
 let guideRect      = null;
+let cameraMode     = 'grading'; // 'grading' | 'calibration'
 
-// ── Session ───────────────────────────────────────────────────────
+// ── Grading session ───────────────────────────────────────────────
 
 async function startGradingSession() {
   const id = actionSheetExamId;
@@ -18,12 +20,28 @@ async function startGradingSession() {
     const exam = await dbGet(id);
     if (!exam) return;
 
-    gradingExam     = exam;
+    // Load and compute the template for this exam
+    if (!exam.templateId) {
+      showToast('This exam has no template. Please edit it and select one.', true);
+      return;
+    }
+    const storedTemplate = await dbGetTemplate(exam.templateId);
+    if (!storedTemplate) {
+      showToast('Template not found. Please re-calibrate.', true);
+      return;
+    }
+
+    gradingExam = {
+      ...exam,
+      computedTemplate: buildComputedTemplate(storedTemplate), // omr.js
+    };
     sessionResults  = [];
     capturedDataUrl = null;
+    cameraMode      = 'grading';
 
-    $('cam-exam-name').textContent = exam.name;
-    $('cam-exam-sub').textContent  = `${exam.questionCount} questions`;
+    $('cam-exam-name').textContent      = exam.name;
+    $('cam-exam-sub').textContent       = `${exam.questionCount} questions`;
+    $('cam-counter').style.visibility   = '';
     updateCamCounter();
     updateFinishBtn();
 
@@ -36,26 +54,31 @@ async function startGradingSession() {
 }
 
 function updateCamCounter() {
-  const n = sessionResults.length;
-  $('cam-counter').textContent = `${n} scanned`;
+  $('cam-counter').textContent = `${sessionResults.length} scanned`;
 }
 
-// Show the "Finish & Review" button once at least one sheet is scanned
 function updateFinishBtn() {
   const btn = $('btn-cam-finish');
-  if (sessionResults.length > 0) {
-    btn.classList.add('visible');
-  } else {
-    btn.classList.remove('visible');
-  }
+  if (sessionResults.length > 0) btn.classList.add('visible');
+  else                            btn.classList.remove('visible');
 }
 
 function finishSession() {
-  // Stop camera, then show the session summary (M5 will build this properly)
-  // For now, go back home and report how many were scanned
   stopCamera();
   showToast(`Session complete — ${sessionResults.length} sheet${sessionResults.length !== 1 ? 's' : ''} scanned`);
-  // M5 hook: showSessionSummary(sessionResults, gradingExam) goes here
+  // M5 hook: showSessionSummary(sessionResults, gradingExam)
+}
+
+// ── Calibration capture ───────────────────────────────────────────
+
+function startCalibrationCapture() {
+  cameraMode = 'calibration';
+  $('cam-exam-name').textContent    = 'Calibrate Sheet';
+  $('cam-exam-sub').textContent     = 'Capture a blank answer sheet';
+  $('cam-counter').style.visibility = 'hidden';
+  $('btn-cam-finish').classList.remove('visible');
+  showCameraScreen();
+  initCamera();
 }
 
 // ── Camera init / teardown ────────────────────────────────────────
@@ -67,18 +90,11 @@ async function initCamera() {
 
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width:  { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
       audio: false,
     });
     video.srcObject = cameraStream;
-    video.onloadedmetadata = () => {
-      video.play();
-      positionGuide();
-    };
+    video.onloadedmetadata = () => { video.play(); positionGuide(); };
   } catch (err) {
     errEl.classList.add('visible');
     console.warn('Camera error:', err);
@@ -90,22 +106,20 @@ function stopCamera() {
     cameraStream.getTracks().forEach(t => t.stop());
     cameraStream = null;
   }
-  torchOn = false;
+  torchOn    = false;
+  cameraMode = 'grading';
   $('cam-flash-btn').classList.remove('on');
   $('cam-thumb').innerHTML = '📄';
   $('btn-cam-finish').classList.remove('visible');
+  $('cam-counter').style.visibility = '';
   hideCameraScreen();
-  // Note: we intentionally keep sessionResults and gradingExam alive
-  // so M5 can read them after the camera closes
 }
 
 // ── Guide overlay ─────────────────────────────────────────────────
 
 function positionGuide() {
-  const vp  = $('cam-viewport');
-  const vpW = vp.clientWidth;
-  const vpH = vp.clientHeight;
-
+  const vp = $('cam-viewport');
+  const vpW = vp.clientWidth, vpH = vp.clientHeight;
   const guideW = Math.round(vpW * 0.88);
   const guideH = Math.round(guideW * 1.35);
   const guideX = Math.round((vpW - guideW) / 2);
@@ -114,49 +128,40 @@ function positionGuide() {
   guideRect = { x: guideX, y: guideY, w: guideW, h: guideH };
 
   $('ovl-top').style.cssText    = `top:0;left:0;right:0;height:${guideY}px`;
-  $('ovl-bottom').style.cssText = `top:${guideY + guideH}px;left:0;right:0;bottom:0`;
+  $('ovl-bottom').style.cssText = `top:${guideY+guideH}px;left:0;right:0;bottom:0`;
   $('ovl-left').style.cssText   = `top:${guideY}px;left:0;width:${guideX}px;height:${guideH}px`;
-  $('ovl-right').style.cssText  = `top:${guideY}px;left:${guideX + guideW}px;right:0;height:${guideH}px`;
+  $('ovl-right').style.cssText  = `top:${guideY}px;left:${guideX+guideW}px;right:0;height:${guideH}px`;
 
   const corners = {
-    'corner-tl': { top: guideY - 2,           left: guideX - 2 },
-    'corner-tr': { top: guideY - 2,           left: guideX + guideW - 22 },
-    'corner-bl': { top: guideY + guideH - 22, left: guideX - 2 },
-    'corner-br': { top: guideY + guideH - 22, left: guideX + guideW - 22 },
+    'corner-tl': { top: guideY-2,           left: guideX-2 },
+    'corner-tr': { top: guideY-2,           left: guideX+guideW-22 },
+    'corner-bl': { top: guideY+guideH-22,   left: guideX-2 },
+    'corner-br': { top: guideY+guideH-22,   left: guideX+guideW-22 },
   };
   Object.entries(corners).forEach(([id, pos]) => {
-    const el = $(id);
-    el.style.top  = pos.top  + 'px';
-    el.style.left = pos.left + 'px';
+    $(id).style.top = pos.top + 'px'; $(id).style.left = pos.left + 'px';
   });
-
   $('cam-guide-label').style.top = (guideY + guideH + 10) + 'px';
 }
 
 window.addEventListener('resize', () => { if (guideRect) positionGuide(); });
 
-// ── Flash / torch ─────────────────────────────────────────────────
+// ── Flash ─────────────────────────────────────────────────────────
 
 async function toggleFlash() {
   if (!cameraStream) return;
   const track = cameraStream.getVideoTracks()[0];
   if (!track) return;
-
   const caps = track.getCapabilities?.() || {};
   const btn  = $('cam-flash-btn');
-
   if (caps.torch) {
     torchOn = !torchOn;
-    try {
-      await track.applyConstraints({ advanced: [{ torch: torchOn }] });
-      btn.classList.toggle('on', torchOn);
-    } catch (e) {
-      console.warn('Torch error:', e);
-    }
+    try { await track.applyConstraints({ advanced: [{ torch: torchOn }] }); btn.classList.toggle('on', torchOn); }
+    catch (e) { console.warn('Torch error:', e); }
   } else {
     torchOn = !torchOn;
     btn.classList.toggle('on', torchOn);
-    showToast(torchOn ? 'Screen brightness increased' : 'Flash off', false);
+    showToast(torchOn ? 'Screen brightness increased' : 'Flash off');
   }
 }
 
@@ -165,53 +170,37 @@ async function toggleFlash() {
 function capturePhoto() {
   const video  = $('cam-video');
   const canvas = $('cam-canvas');
+  if (!video.srcObject || video.readyState < 2) { showToast('Camera not ready yet', true); return; }
 
-  if (!video.srcObject || video.readyState < 2) {
-    showToast('Camera not ready yet', true);
-    return;
-  }
-
-  // Flash feedback
   const flashEl = $('cam-flash');
   flashEl.classList.add('flash');
   setTimeout(() => flashEl.classList.remove('flash'), 120);
 
-  // Draw full video frame to hidden canvas
-  const vw = video.videoWidth  || 1280;
-  const vh = video.videoHeight || 720;
-  canvas.width  = vw;
-  canvas.height = vh;
+  const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+  canvas.width = vw; canvas.height = vh;
   canvas.getContext('2d').drawImage(video, 0, 0, vw, vh);
 
-  // Map guide rect from viewport pixels → video pixels
-  const vp          = $('cam-viewport');
-  const vpW         = vp.clientWidth;
-  const vpH         = vp.clientHeight;
-  const videoAspect = vw / vh;
-  const vpAspect    = vpW / vpH;
+  const vp = $('cam-viewport');
+  const vpW = vp.clientWidth, vpH = vp.clientHeight;
+  const videoAspect = vw/vh, vpAspect = vpW/vpH;
   let dispW, dispH, offsetX, offsetY;
-
   if (videoAspect > vpAspect) {
-    dispH = vpH; dispW = vpH * videoAspect;
-    offsetX = (dispW - vpW) / 2; offsetY = 0;
+    dispH = vpH; dispW = vpH * videoAspect; offsetX = (dispW-vpW)/2; offsetY = 0;
   } else {
-    dispW = vpW; dispH = vpW / videoAspect;
-    offsetX = 0; offsetY = (dispH - vpH) / 2;
+    dispW = vpW; dispH = vpW/videoAspect; offsetX = 0; offsetY = (dispH-vpH)/2;
   }
 
-  const scaleX = vw / dispW;
-  const scaleY = vh / dispH;
-  const cropX  = Math.round((guideRect.x + offsetX) * scaleX);
-  const cropY  = Math.round((guideRect.y + offsetY) * scaleY);
-  const cropW  = Math.round(guideRect.w * scaleX);
-  const cropH  = Math.round(guideRect.h * scaleY);
+  const scaleX = vw/dispW, scaleY = vh/dispH;
+  const cropX = Math.round((guideRect.x+offsetX)*scaleX);
+  const cropY = Math.round((guideRect.y+offsetY)*scaleY);
+  const cropW = Math.round(guideRect.w*scaleX);
+  const cropH = Math.round(guideRect.h*scaleY);
 
-  const cropCanvas = document.createElement('canvas');
-  cropCanvas.width  = cropW;
-  cropCanvas.height = cropH;
-  cropCanvas.getContext('2d').drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+  const cc = document.createElement('canvas');
+  cc.width = cropW; cc.height = cropH;
+  cc.getContext('2d').drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
 
-  capturedDataUrl = cropCanvas.toDataURL('image/jpeg', 0.92);
+  capturedDataUrl = cc.toDataURL('image/jpeg', 0.92);
   $('cam-thumb').innerHTML = `<img src="${capturedDataUrl}" alt="last">`;
   showPreviewScreen(capturedDataUrl);
 }
@@ -228,23 +217,24 @@ function hidePreviewScreen() {
   capturedDataUrl = null;
 }
 
-function retakePhoto() {
-  hidePreviewScreen();
-  // Camera stays running — returns to live viewfinder
-}
+function retakePhoto() { hidePreviewScreen(); }
 
 function usePhoto() {
   if (!capturedDataUrl) return;
   const dataUrl = capturedDataUrl;
   hidePreviewScreen();
-  showResultScreen(dataUrl); // defined in results.js
+  if (cameraMode === 'calibration') {
+    hideCameraScreen();
+    showCalibrationScreen(dataUrl, calibOnSave); // calibration.js
+  } else {
+    showResultScreen(dataUrl); // results.js
+  }
 }
 
 // ── Screen helpers ────────────────────────────────────────────────
 
 function showCameraScreen() {
   $('screen-camera').classList.add('active');
-  // Position guide immediately — even before camera loads
   requestAnimationFrame(() => positionGuide());
 }
 

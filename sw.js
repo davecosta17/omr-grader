@@ -16,6 +16,7 @@ const ASSETS = [
   './js/dom.js',
   './js/store.js',
   './js/omr.js',
+  './js/calibration.js',
   './js/exams.js',
   './js/results.js',
   './js/camera.js',
