@@ -104,8 +104,7 @@ body {
 
 /* Camera & preview & result screens go full-screen (over the topbar too) */
 #screen-camera,
-#screen-preview,
-#screen-result {
+#screen-preview {
   top: 0;
   z-index: 150;
   background: #000;
@@ -497,13 +496,15 @@ body {
 .btn-use    { background: var(--aqua); color: var(--navy); }
 
 /* ── RESULT SCREEN ─────────────────────────── */
-/* #screen-result inherits position:fixed; top:0; z-index:150 */
+/* ── RESULT SCREEN ── */
 #screen-result {
   display: none;
   flex-direction: column;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
   background: var(--lavender);
+  z-index: 160;
   overflow-y: auto;
-  z-index: 160;   /* above camera */
 }
 #screen-result.active { display: flex; }
 

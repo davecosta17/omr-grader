@@ -65,10 +65,14 @@ async function showResultScreen(dataUrl) {
 function discardResult() {
   $('screen-result').classList.remove('active');
   pendingResult = null;
+  // Return to camera so the teacher can retake the shot
+  showCameraScreen();
+  initCamera();
 }
 
 function confirmResult() {
   if (!pendingResult) return;
+
   sessionResults.push({
     dataUrl:   pendingResult.dataUrl,
     answers:   pendingResult.answers,
@@ -78,9 +82,16 @@ function confirmResult() {
     flagged:   pendingResult.flagged,
     timestamp: Date.now(),
   });
+
+  const saved = sessionResults.length;
   updateCamCounter();
   updateFinishBtn();
   pendingResult = null;
+
+  // Hide result screen and return to camera for the next sheet.
+  // The camera stream was stopped in usePhoto(), so we restart it.
   $('screen-result').classList.remove('active');
-  showToast(`Sheet ${sessionResults.length} saved ✓`);
+  showToast(`Sheet ${saved} saved ✓`);
+  showCameraScreen();   // defined in camera.js — re-shows camera UI
+  initCamera();         // defined in camera.js — restarts the stream
 }
