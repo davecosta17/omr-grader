@@ -60,6 +60,15 @@ function initEventListeners() {
   on('btn-result-discard', 'click', discardResult);
   on('btn-result-confirm', 'click', confirmResult);
 
+  // ── Hard reset ───────────────────────────────────────────────
+  on('btn-hard-refresh', 'click', showResetModal);
+  on('btn-reset-cancel',  'click', closeResetModal);
+  on('btn-reset-confirm', 'click', hardReset);
+
+  $('reset-modal').addEventListener('click', e => {
+    if (e.target === $('reset-modal')) closeResetModal();
+  });
+
   // ── Calibration ───────────────────────────────────────────────
   on('btn-calib-save',   'click', saveCalibration);
   on('btn-calib-cancel', 'click', () => {
@@ -73,6 +82,47 @@ function registerServiceWorker() {
     navigator.serviceWorker.register('./sw.js')
       .then(reg => console.log('SW registered:', reg.scope))
       .catch(err => console.warn('SW registration failed:', err));
+  }
+}
+
+// ── Hard reset (wipe all data + reload latest version) ───────────
+
+function showResetModal() {
+  $('reset-modal').classList.add('visible');
+}
+
+function closeResetModal() {
+  $('reset-modal').classList.remove('visible');
+}
+
+async function hardReset() {
+  try {
+    // 1. Delete both IndexedDB stores
+    await new Promise((resolve, reject) => {
+      const req = indexedDB.deleteDatabase('ges_omr');
+      req.onsuccess = resolve;
+      req.onerror   = reject;
+      req.onblocked = resolve; // proceed even if blocked
+    });
+
+    // 2. Clear the service worker cache
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+
+    // 3. Unregister the service worker so the next load fetches fresh files
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+
+    // 4. Hard reload — bypasses browser cache
+    location.reload(true);
+
+  } catch (err) {
+    console.error('Hard reset error:', err);
+    showToast('Reset failed: ' + (err.message || err), true);
   }
 }
 

@@ -1,14 +1,34 @@
 // camera.js — camera hardware, capture, preview, and session management
-// Result screen logic lives in results.js
-// Calibration screen logic lives in calibration.js
 
-let gradingExam    = null;
-let sessionResults = [];
+let gradingExam     = null;
+let sessionResults  = [];
 let capturedDataUrl = null;
-let cameraStream   = null;
-let torchOn        = false;
-let guideRect      = null;
-let cameraMode     = 'grading'; // 'grading' | 'calibration'
+let cameraStream    = null;
+let torchOn         = false;
+let guideRect       = null;
+let cameraMode      = 'grading'; // 'grading' | 'calibration'
+
+// ── Screen helpers ────────────────────────────────────────────────
+// Camera/calibration/result screens are full-screen overlays.
+// They don't use showScreen() because they stack over the normal flow.
+// We hide the normal screens explicitly so nothing bleeds through.
+
+const NORMAL_SCREENS = ['screen-home', 'screen-create'];
+
+function hideNormalScreens() {
+  NORMAL_SCREENS.forEach(id => $( id).classList.remove('active'));
+}
+
+function showCameraScreen() {
+  hideNormalScreens();
+  $('screen-camera').classList.add('active');
+  requestAnimationFrame(() => positionGuide());
+}
+
+function hideCameraScreen() {
+  $('screen-camera').classList.remove('active');
+  $('screen-preview').classList.remove('active');
+}
 
 // ── Grading session ───────────────────────────────────────────────
 
@@ -20,7 +40,6 @@ async function startGradingSession() {
     const exam = await dbGet(id);
     if (!exam) return;
 
-    // Load and compute the template for this exam
     if (!exam.templateId) {
       showToast('This exam has no template. Please edit it and select one.', true);
       return;
@@ -33,15 +52,15 @@ async function startGradingSession() {
 
     gradingExam = {
       ...exam,
-      computedTemplate: buildComputedTemplate(storedTemplate), // omr.js
+      computedTemplate: buildComputedTemplate(storedTemplate),
     };
     sessionResults  = [];
     capturedDataUrl = null;
     cameraMode      = 'grading';
 
-    $('cam-exam-name').textContent      = exam.name;
-    $('cam-exam-sub').textContent       = `${exam.questionCount} questions`;
-    $('cam-counter').style.visibility   = '';
+    $('cam-exam-name').textContent     = exam.name;
+    $('cam-exam-sub').textContent      = `${exam.questionCount} questions`;
+    $('cam-counter').style.visibility  = 'visible';
     updateCamCounter();
     updateFinishBtn();
 
@@ -111,14 +130,19 @@ function stopCamera() {
   $('cam-flash-btn').classList.remove('on');
   $('cam-thumb').innerHTML = '📄';
   $('btn-cam-finish').classList.remove('visible');
-  $('cam-counter').style.visibility = '';
+  $('cam-counter').style.visibility = 'visible';
   hideCameraScreen();
+
+  // Restore the last normal screen
+  const wasOnCreate = editingId !== null || (typeof currentExam === 'object' && currentExam && $('screen-create').style.display !== 'none');
+  // Always return to home — if mid-exam-creation the exam form will have been shown separately
+  $('screen-home').classList.add('active');
 }
 
 // ── Guide overlay ─────────────────────────────────────────────────
 
 function positionGuide() {
-  const vp = $('cam-viewport');
+  const vp  = $('cam-viewport');
   const vpW = vp.clientWidth, vpH = vp.clientHeight;
   const guideW = Math.round(vpW * 0.88);
   const guideH = Math.round(guideW * 1.35);
@@ -191,10 +215,10 @@ function capturePhoto() {
   }
 
   const scaleX = vw/dispW, scaleY = vh/dispH;
-  const cropX = Math.round((guideRect.x+offsetX)*scaleX);
-  const cropY = Math.round((guideRect.y+offsetY)*scaleY);
-  const cropW = Math.round(guideRect.w*scaleX);
-  const cropH = Math.round(guideRect.h*scaleY);
+  const cropX  = Math.round((guideRect.x+offsetX)*scaleX);
+  const cropY  = Math.round((guideRect.y+offsetY)*scaleY);
+  const cropW  = Math.round(guideRect.w*scaleX);
+  const cropH  = Math.round(guideRect.h*scaleY);
 
   const cc = document.createElement('canvas');
   cc.width = cropW; cc.height = cropH;
@@ -222,23 +246,18 @@ function retakePhoto() { hidePreviewScreen(); }
 function usePhoto() {
   if (!capturedDataUrl) return;
   const dataUrl = capturedDataUrl;
+  // Stop the live camera stream before showing calibration — saves battery
+  // and avoids two screens fighting for the camera
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
   hidePreviewScreen();
+  hideCameraScreen();
+
   if (cameraMode === 'calibration') {
-    hideCameraScreen();
     showCalibrationScreen(dataUrl, calibOnSave); // calibration.js
   } else {
     showResultScreen(dataUrl); // results.js
   }
-}
-
-// ── Screen helpers ────────────────────────────────────────────────
-
-function showCameraScreen() {
-  $('screen-camera').classList.add('active');
-  requestAnimationFrame(() => positionGuide());
-}
-
-function hideCameraScreen() {
-  $('screen-camera').classList.remove('active');
-  $('screen-preview').classList.remove('active');
 }

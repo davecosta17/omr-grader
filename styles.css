@@ -72,14 +72,21 @@ body {
 }
 .topbar-back:hover { background: rgba(255,255,255,0.08); }
 .topbar-back.visible { display: flex; }
-.topbar-logo { height: 32px; width: auto; object-fit: contain; display: block; }
-.topbar-badge {
-  background: var(--aqua); color: var(--navy);
-  font-family: 'Space Mono', monospace;
-  font-size: 10px; font-weight: 700;
-  padding: 3px 8px; border-radius: 20px;
-  letter-spacing: 0.04em;
+.topbar-logo {
+  height: 32px; width: auto; object-fit: contain; display: block;
+  mix-blend-mode: screen;  /* removes black background on dark topbar */
 }
+.topbar-refresh-btn {
+  background: rgba(255,255,255,0.12); border: 1.5px solid rgba(255,255,255,0.25);
+  color: var(--aqua); font-size: 18px; font-weight: 700;
+  width: 36px; height: 36px; border-radius: 50%;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background var(--transition), transform var(--transition);
+  flex-shrink: 0;
+  line-height: 1;
+}
+.topbar-refresh-btn:active { background: rgba(255,255,255,0.25); transform: rotate(180deg); }
+.topbar-refresh-btn:hover  { background: rgba(255,255,255,0.18); }
 
 /* ── SCREENS ───────────────────────────────── */
 /* Normal (non-camera) screens sit below the fixed topbar and scroll internally */
@@ -98,11 +105,12 @@ body {
 /* Camera & preview & result screens go full-screen (over the topbar too) */
 #screen-camera,
 #screen-preview,
-#screen-result {
+#screen-result,
+#screen-calibration {
   top: 0;       /* cover topbar as well */
   z-index: 150;
   background: #000;
-  overflow: hidden;  /* these screens never scroll */
+  overflow: hidden;
 }
 
 /* ── HOME SCREEN ───────────────────────────── */
@@ -664,12 +672,11 @@ body {
 
 /* ── CALIBRATION SCREEN ────────────────────── */
 #screen-calibration {
-  display: none; flex-direction: column;
-  background: #111;
-  z-index: 180;  /* above camera */
-  overflow: hidden;
+  background: #111 !important;
+  z-index: 180 !important;  /* must be above camera z-index:150 */
+  overflow-y: auto !important;
 }
-#screen-calibration.active { display: flex; }
+#screen-calibration.active { display: flex !important; }
 
 .calib-topbar {
   background: var(--navy); color: #fff;
@@ -744,3 +751,7 @@ body {
 .calib-actions { display: flex; gap: 10px; }
 .calib-actions .btn-secondary { flex: 1; }
 .calib-actions .btn-save      { flex: 2; }
+
+/* ── RESET MODAL ───────────────────────────── */
+/* Reuses .modal-overlay and .modal styles */
+#reset-modal .modal-title { color: var(--red); }

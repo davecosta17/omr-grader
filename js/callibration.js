@@ -45,6 +45,8 @@ function showCalibrationScreen(dataUrl, onSave) {
   $('calib-name').value    = '';
   $('calib-global').checked = false;
 
+  // Hide normal screens so they don't bleed through
+  ['screen-home','screen-create'].forEach(id => $(id).classList.remove('active'));
   $('screen-calibration').classList.add('active');
 
   // Load image dimensions then draw
@@ -61,6 +63,8 @@ function hideCalibrationScreen() {
   $('screen-calibration').classList.remove('active');
   calibDataUrl  = null;
   calibDragging = null;
+  // Restore home screen
+  $('screen-home').classList.add('active');
 }
 
 // ── Drawing ───────────────────────────────────────────────────────
