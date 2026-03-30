@@ -178,10 +178,13 @@
       <div class="cam-corner bl" id="corner-bl"></div>
       <div class="cam-corner br" id="corner-br"></div>
       <div class="cam-guide-label" id="cam-guide-label">Align sheet within the frame</div>
+    </div>
+
+    <!-- Finish button is a SIBLING of cam-overlay, not a child,
+         so it is NOT affected by cam-overlay's pointer-events:none -->
     <button class="cam-finish-btn" id="btn-cam-finish" title="Finish session">
       ✓ Finish &amp; Review
     </button>
-    </div>
 
     <div class="cam-flash" id="cam-flash"></div>
 

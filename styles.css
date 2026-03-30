@@ -441,16 +441,19 @@ body {
 
 /* Finish session button */
 .cam-finish-btn {
-  position: absolute; top: 12px; right: 16px; z-index: 20;
+  position: absolute; top: 14px; right: 14px; z-index: 30;
   background: var(--aqua); color: var(--navy);
   border: none; border-radius: 20px;
   font-family: 'Outfit', sans-serif; font-size: 12px; font-weight: 700;
-  padding: 6px 14px; cursor: pointer; letter-spacing: 0.02em;
+  padding: 8px 16px; cursor: pointer; letter-spacing: 0.02em;
   display: none; align-items: center; gap: 6px;
+  pointer-events: auto;   /* explicit — cam-viewport children inherit nothing harmful,
+                             but this is a reminder of intent */
   transition: opacity var(--transition), transform var(--transition);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
 }
 .cam-finish-btn.visible { display: flex; }
+.cam-finish-btn:active   { transform: scale(0.95); }
 .cam-finish-btn:active { transform: scale(0.95); }
 
 .cam-error {
