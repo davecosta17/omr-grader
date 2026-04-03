@@ -12,7 +12,7 @@ let cvLoadPromise = null;
 
 // Must end with the filename — a trailing slash fetches the directory listing (HTML),
 // which causes "Unexpected token '<'" when injected as a script.
-const OPENCV_URL = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js/opencv.js';
+const OPENCV_URL = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js/dist/opencv.min.js';
 
 function loadOpenCV() {
   if (cvLoaded && cv) return Promise.resolve(cv);
