@@ -7,7 +7,7 @@ let cvLoading    = false;
 let cvLoaded     = false;
 let cvLoadPromise = null;
 
-const OPENCV_URL = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@latest/opencv.js';
+const OPENCV_URL = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@latest/';
 
 // Returns a Promise<cv> — resolves when OpenCV is ready.
 // Shows and hides the loading screen automatically.
@@ -52,22 +52,24 @@ function loadOpenCV() {
         // OpenCV.js calls this when WASM is ready.
         // locateFile tells OpenCV where to find opencv_js.wasm — without this,
         // it tries to resolve the WASM relative to the blob: URL, which is a 404.
-        const OPENCV_BASE = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@latest/opencv.js';
+        const OPENCV_BASE = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@latest/';
         window.Module = {
-          locateFile(path) {
-            // Only redirect .wasm files; everything else resolves normally
-            if (path.endsWith('.wasm')) return OPENCV_BASE + path;
-            return path;
-          },
-          onRuntimeInitialized() {
-            cv = window.cv;
-            cvLoaded  = true;
-            cvLoading = false;
-            URL.revokeObjectURL(blobUrl);
-            hideOpenCVLoadingScreen();
-            resolve(cv);
-          },
-        };
+  locateFile(path) {
+    // Fix: correct base path for WASM file
+    const OPENCV_BASE = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@latest/';
+    
+    if (path.endsWith('.wasm')) return OPENCV_BASE + path;
+    return path;
+  },
+  onRuntimeInitialized() {
+    cv = window.cv;
+    cvLoaded  = true;
+    cvLoading = false;
+    URL.revokeObjectURL(blobUrl);
+    hideOpenCVLoadingScreen();
+    resolve(cv);
+  },
+};
 
         script.src = blobUrl;
         script.onerror = err => {
