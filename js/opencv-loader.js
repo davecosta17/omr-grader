@@ -2,17 +2,18 @@
 // OpenCV is ~8MB, downloaded once and cached by the browser.
 // Call loadOpenCV() to start; it shows a loading screen automatically.
 //
-// Package: @techstark/opencv-js — pure JS build (no .wasm file needed)
-// URL must point to the FILE, not the package directory (no trailing slash).
+// Package: @techstark/opencv-js
+// This build exposes window.cv as a Promise<cvInstance> — NOT the raw
+// Emscripten window.Module / onRuntimeInitialized API. We wait for
+// script.onload, then await window.cv.then() to get the actual cv object.
 
 let cv            = null;
 let cvLoading     = false;
 let cvLoaded      = false;
 let cvLoadPromise = null;
 
-// Must end with the filename — a trailing slash fetches the directory listing (HTML),
-// which causes "Unexpected token '<'" when injected as a script.
-const OPENCV_URL = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.12.0-release.1/dist/opencv.min.js';
+const OPENCV_URL =
+  'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.12.0-release.1/dist/opencv.min.js';
 
 function loadOpenCV() {
   if (cvLoaded && cv) return Promise.resolve(cv);
@@ -24,13 +25,13 @@ function loadOpenCV() {
 
     const xhr = new XMLHttpRequest();
     xhr.open('GET', OPENCV_URL, true);
-    xhr.responseType = 'arraybuffer'; // keep as raw bytes — avoids UTF-8 decode issues
+    xhr.responseType = 'arraybuffer'; // raw bytes — avoids UTF-8 decode corruption
 
     xhr.onprogress = e => {
       if (e.lengthComputable) {
         updateOpenCVProgress(e.loaded / e.total);
       } else {
-        updateOpenCVProgress(-1); // indeterminate
+        updateOpenCVProgress(-1); // indeterminate animation
       }
     };
 
@@ -49,33 +50,42 @@ function loadOpenCV() {
         const blobUrl = URL.createObjectURL(blob);
         const script  = document.createElement('script');
 
-        // Set window.Module BEFORE the script tag is appended so OpenCV
-        // reads it on startup. onRuntimeInitialized fires when the JS
-        // module finishes setting itself up.
-        // @techstark/opencv-js is pure JS — no .wasm fetch occurs —
-        // but locateFile is kept as a safety net.
-        window.Module = {
-          locateFile(path) {
-            if (path.endsWith('.wasm')) {
-              return 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js/' + path;
-            }
-            return path;
-          },
-          onRuntimeInitialized() {
-            cv        = window.cv;
+        // @techstark/opencv-js sets window.cv to a Promise<cvInstance>
+        // when the script finishes executing. We wait for script.onload
+        // (script has run) then resolve that Promise to get the cv object.
+        script.onload = () => {
+          URL.revokeObjectURL(blobUrl);
+
+          if (!window.cv) {
+            onOpenCVFail('cv not found after script load');
+            reject(new Error('cv not found after script load'));
+            return;
+          }
+
+          // window.cv is a Promise in the techstark build
+          const cvPromise = (typeof window.cv.then === 'function')
+            ? window.cv
+            : Promise.resolve(window.cv);
+
+          cvPromise.then(instance => {
+            cv        = instance;
             cvLoaded  = true;
             cvLoading = false;
-            URL.revokeObjectURL(blobUrl);
             hideOpenCVLoadingScreen();
             resolve(cv);
-          },
+          }).catch(err => {
+            onOpenCVFail('Initialisation failed: ' + (err.message || err));
+            reject(err);
+          });
         };
 
-        script.src    = blobUrl;
         script.onerror = err => {
+          URL.revokeObjectURL(blobUrl);
           onOpenCVFail('Script execution failed');
           reject(err);
         };
+
+        script.src = blobUrl;
         document.head.appendChild(script);
 
       } catch (err) {
@@ -124,7 +134,7 @@ function updateOpenCVProgress(fraction) {
     if (!indeterminateTimer) {
       let pos = 0;
       indeterminateTimer = setInterval(() => {
-        pos = (pos + 2) % 70; // sweep across 70% of bar
+        pos = (pos + 2) % 70;
         bar.style.width      = '30%';
         bar.style.marginLeft = pos + '%';
       }, 30);
