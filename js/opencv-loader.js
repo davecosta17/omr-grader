@@ -7,7 +7,7 @@ let cvLoading    = false;
 let cvLoaded     = false;
 let cvLoadPromise = null;
 
-const OPENCV_URL = 'https://cdn.jsdelivr.net/npm/opencv-wasm-js/opencv.js';
+const OPENCV_URL = 'https://cdnjs.cloudflare.com/ajax/libs/opencv.js/4.8.0/opencv.js';
 
 // Returns a Promise<cv> — resolves when OpenCV is ready.
 // Shows and hides the loading screen automatically.
@@ -22,7 +22,7 @@ function loadOpenCV() {
     // Use XHR so we get download progress events
     const xhr = new XMLHttpRequest();
     xhr.open('GET', OPENCV_URL, true);
-    xhr.responseType = 'text';
+    xhr.responseType = 'arraybuffer';
 
     xhr.onprogress = e => {
       if (e.lengthComputable) {
@@ -45,12 +45,20 @@ function loadOpenCV() {
 
       // Inject the script via blob URL — this executes the OpenCV WASM module
       try {
-        const blob   = new Blob([xhr.responseText], { type: 'text/javascript' });
+        const blob   = new Blob([xhr.response], { type: 'text/javascript' });
         const blobUrl = URL.createObjectURL(blob);
         const script  = document.createElement('script');
 
-        // OpenCV.js calls this when WASM is ready
+        // OpenCV.js calls this when WASM is ready.
+        // locateFile tells OpenCV where to find opencv_js.wasm — without this,
+        // it tries to resolve the WASM relative to the blob: URL, which is a 404.
+        const OPENCV_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/opencv.js/4.8.0/';
         window.Module = {
+          locateFile(path) {
+            // Only redirect .wasm files; everything else resolves normally
+            if (path.endsWith('.wasm')) return OPENCV_BASE + path;
+            return path;
+          },
           onRuntimeInitialized() {
             cv = window.cv;
             cvLoaded  = true;
