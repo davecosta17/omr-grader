@@ -7,7 +7,7 @@ let cvLoading    = false;
 let cvLoaded     = false;
 let cvLoadPromise = null;
 
-const OPENCV_URL = 'https://cdnjs.cloudflare.com/ajax/libs/opencv.js/4.8.0/opencv.js';
+const OPENCV_URL = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@latest/opencv.js';
 
 // Returns a Promise<cv> — resolves when OpenCV is ready.
 // Shows and hides the loading screen automatically.
