@@ -1,16 +1,19 @@
 // opencv-loader.js — lazy loads OpenCV.js with progress UI
 // OpenCV is ~8MB, downloaded once and cached by the browser.
 // Call loadOpenCV() to start; it shows a loading screen automatically.
+//
+// Package: @techstark/opencv-js — pure JS build (no .wasm file needed)
+// URL must point to the FILE, not the package directory (no trailing slash).
 
-let cv           = null;
-let cvLoading    = false;
-let cvLoaded     = false;
+let cv            = null;
+let cvLoading     = false;
+let cvLoaded      = false;
 let cvLoadPromise = null;
 
-const OPENCV_URL = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@latest/';
+// Must end with the filename — a trailing slash fetches the directory listing (HTML),
+// which causes "Unexpected token '<'" when injected as a script.
+const OPENCV_URL = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js/opencv.js';
 
-// Returns a Promise<cv> — resolves when OpenCV is ready.
-// Shows and hides the loading screen automatically.
 function loadOpenCV() {
   if (cvLoaded && cv) return Promise.resolve(cv);
   if (cvLoadPromise) return cvLoadPromise;
@@ -19,17 +22,15 @@ function loadOpenCV() {
     cvLoading = true;
     showOpenCVLoadingScreen();
 
-    // Use XHR so we get download progress events
     const xhr = new XMLHttpRequest();
     xhr.open('GET', OPENCV_URL, true);
-    xhr.responseType = 'arraybuffer';
+    xhr.responseType = 'arraybuffer'; // keep as raw bytes — avoids UTF-8 decode issues
 
     xhr.onprogress = e => {
       if (e.lengthComputable) {
         updateOpenCVProgress(e.loaded / e.total);
       } else {
-        // Total unknown — animate indeterminate bar
-        updateOpenCVProgress(-1);
+        updateOpenCVProgress(-1); // indeterminate
       }
     };
 
@@ -43,40 +44,40 @@ function loadOpenCV() {
       updateOpenCVProgress(1);
       setOpenCVLoadingLabel('Initialising…');
 
-      // Inject the script via blob URL — this executes the OpenCV WASM module
       try {
-        const blob   = new Blob([xhr.response], { type: 'text/javascript' });
+        const blob    = new Blob([xhr.response], { type: 'text/javascript' });
         const blobUrl = URL.createObjectURL(blob);
         const script  = document.createElement('script');
 
-        // OpenCV.js calls this when WASM is ready.
-        // locateFile tells OpenCV where to find opencv_js.wasm — without this,
-        // it tries to resolve the WASM relative to the blob: URL, which is a 404.
-        const OPENCV_BASE = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@latest/';
+        // Set window.Module BEFORE the script tag is appended so OpenCV
+        // reads it on startup. onRuntimeInitialized fires when the JS
+        // module finishes setting itself up.
+        // @techstark/opencv-js is pure JS — no .wasm fetch occurs —
+        // but locateFile is kept as a safety net.
         window.Module = {
-  locateFile(path) {
-    // Fix: correct base path for WASM file
-    const OPENCV_BASE = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@latest/';
-    
-    if (path.endsWith('.wasm')) return OPENCV_BASE + path;
-    return path;
-  },
-  onRuntimeInitialized() {
-    cv = window.cv;
-    cvLoaded  = true;
-    cvLoading = false;
-    URL.revokeObjectURL(blobUrl);
-    hideOpenCVLoadingScreen();
-    resolve(cv);
-  },
-};
+          locateFile(path) {
+            if (path.endsWith('.wasm')) {
+              return 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js/' + path;
+            }
+            return path;
+          },
+          onRuntimeInitialized() {
+            cv        = window.cv;
+            cvLoaded  = true;
+            cvLoading = false;
+            URL.revokeObjectURL(blobUrl);
+            hideOpenCVLoadingScreen();
+            resolve(cv);
+          },
+        };
 
-        script.src = blobUrl;
+        script.src    = blobUrl;
         script.onerror = err => {
           onOpenCVFail('Script execution failed');
           reject(err);
         };
         document.head.appendChild(script);
+
       } catch (err) {
         onOpenCVFail(err.message);
         reject(err);
@@ -94,7 +95,6 @@ function loadOpenCV() {
   return cvLoadPromise;
 }
 
-// Returns cv synchronously if already loaded, null otherwise
 function getCv() { return cvLoaded ? cv : null; }
 
 // ── Loading screen UI ─────────────────────────────────────────────
@@ -103,7 +103,6 @@ function showOpenCVLoadingScreen() {
   $('screen-opencv-loading').classList.add('active');
   updateOpenCVProgress(0);
   setOpenCVLoadingLabel('Downloading vision engine… (one-time, ~8 MB)');
-  // Hide other active screens so nothing bleeds through
   ['screen-home','screen-create','screen-camera',
    'screen-calibration','screen-corner-adjust'].forEach(id => {
     const el = $(id);
@@ -122,12 +121,11 @@ function updateOpenCVProgress(fraction) {
   if (!bar || !label) return;
 
   if (fraction < 0) {
-    // Indeterminate — animate bar
     if (!indeterminateTimer) {
       let pos = 0;
       indeterminateTimer = setInterval(() => {
-        pos = (pos + 2) % 100;
-        bar.style.width = '30%';
+        pos = (pos + 2) % 70; // sweep across 70% of bar
+        bar.style.width      = '30%';
         bar.style.marginLeft = pos + '%';
       }, 30);
     }
@@ -136,8 +134,8 @@ function updateOpenCVProgress(fraction) {
     clearInterval(indeterminateTimer);
     indeterminateTimer = null;
     bar.style.marginLeft = '0';
-    bar.style.width = Math.round(fraction * 100) + '%';
-    label.textContent = fraction >= 1 ? '100%' : Math.round(fraction * 100) + '%';
+    bar.style.width      = Math.round(fraction * 100) + '%';
+    label.textContent    = fraction >= 1 ? '100%' : Math.round(fraction * 100) + '%';
   }
 }
 
@@ -148,7 +146,7 @@ function setOpenCVLoadingLabel(text) {
 
 function onOpenCVFail(reason) {
   cvLoading     = false;
-  cvLoadPromise = null;  // allow retry
+  cvLoadPromise = null; // allow retry
   setOpenCVLoadingLabel('Failed: ' + reason);
   const btn = $('btn-opencv-retry');
   if (btn) btn.style.display = 'inline-flex';
