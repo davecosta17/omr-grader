@@ -225,6 +225,7 @@
     <div class="preview-label">Is the sheet clear and fully visible?</div>
     <div class="preview-actions">
       <button class="btn-cam-action btn-retake" id="btn-preview-retake">Retake</button>
+      <button class="btn-cam-action btn-adjust" id="btn-preview-adjust" title="Adjust borders before grading">Adjust</button>
       <button class="btn-cam-action btn-use" id="btn-preview-use">Use Photo &rarr;</button>
     </div>
   </div>
@@ -283,6 +284,27 @@
   </div>
 </div>
 
+<!-- CORNER ADJUST SCREEN -->
+<div class="screen" id="screen-corner-adjust">
+  <div class="cadj-topbar">
+    <button class="cam-back-btn" id="btn-cadj-cancel">&#8592;</button>
+    <div class="cadj-topbar-info">
+      <div class="cadj-topbar-title">Adjust Borders</div>
+      <div class="cadj-topbar-sub" id="cadj-hint">Drag handles to the corners of the answer grid</div>
+    </div>
+  </div>
+
+  <div class="cadj-workspace" id="cadj-workspace">
+    <canvas id="cadj-canvas"></canvas>
+  </div>
+
+  <div class="cadj-bottom">
+    <button class="btn-secondary" id="btn-cadj-cancel-bottom"
+            onclick="document.getElementById('btn-cadj-cancel').click()">Cancel</button>
+    <button class="btn-save" id="cadj-confirm-btn">Confirm &rarr;</button>
+  </div>
+</div>
+
 <!-- CALIBRATION SCREEN -->
 <div class="screen" id="screen-calibration">
   <div class="calib-topbar">
@@ -318,6 +340,22 @@
       <button class="btn-secondary" id="btn-calib-cancel-bottom" onclick="document.getElementById('btn-calib-cancel').click()">Cancel</button>
       <button class="btn-save" id="btn-calib-save">Save Template</button>
     </div>
+  </div>
+</div>
+
+<!-- OPENCV LOADING SCREEN -->
+<div class="screen" id="screen-opencv-loading">
+  <div class="opencv-loading-inner">
+    <div class="opencv-loading-icon">🔬</div>
+    <div class="opencv-loading-title">Loading Vision Engine</div>
+    <div class="opencv-loading-label" id="opencv-loading-label">Downloading… (one-time, ~8 MB)</div>
+    <div class="opencv-progress-bar">
+      <div class="opencv-progress-fill" id="opencv-progress-fill"></div>
+    </div>
+    <div class="opencv-progress-pct" id="opencv-progress-pct">0%</div>
+    <button class="btn-secondary" id="btn-opencv-retry" style="display:none;margin-top:16px"
+            onclick="cvLoadPromise=null;loadOpenCV()">Retry</button>
+    <div class="opencv-note">This only downloads once. After that the app works fully offline.</div>
   </div>
 </div>
 
@@ -357,6 +395,9 @@
 <script src="js/dom.js"></script>
 <script src="js/store.js"></script>
 <script src="js/omr.js"></script>
+<script src="js/opencv-loader.js"></script>
+<script src="js/warp.js"></script>
+<script src="js/corner-adjust.js"></script>
 <script src="js/calibration.js"></script>
 <script src="js/exams.js"></script>
 <script src="js/results.js"></script>

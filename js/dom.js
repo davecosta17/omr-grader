@@ -44,3 +44,20 @@ function escHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
+
+// Shared by calibration.js and corner-adjust.js.
+// Returns { x, y, w, h } — the rectangle the image occupies inside
+// a container when scaled to fit (object-fit: contain logic).
+function getImageDisplayRect(natW, natH, containerW, containerH) {
+  const imgAspect = natW / natH;
+  const conAspect = containerW / containerH;
+  let w, h, x, y;
+  if (imgAspect > conAspect) {
+    w = containerW; h = w / imgAspect;
+    x = 0;          y = (containerH - h) / 2;
+  } else {
+    h = containerH; w = h * imgAspect;
+    x = (containerW - w) / 2; y = 0;
+  }
+  return { x, y, w, h };
+}

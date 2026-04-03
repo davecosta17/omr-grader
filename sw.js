@@ -3,7 +3,7 @@
 // Strategy: Cache-first for static assets, network-first is not needed
 // since all data lives in IndexedDB on the device.
 
-const CACHE_NAME = 'ghost-omr-v2';
+const CACHE_NAME = 'ghost-omr-v3';
 
 // All files that make up the app shell.
 // Update CACHE_NAME above whenever you deploy new versions
@@ -16,6 +16,9 @@ const ASSETS = [
   './js/dom.js',
   './js/store.js',
   './js/omr.js',
+  './js/opencv-loader.js',
+  './js/warp.js',
+  './js/corner-adjust.js',
   './js/calibration.js',
   './js/exams.js',
   './js/results.js',

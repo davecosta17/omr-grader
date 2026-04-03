@@ -1,57 +1,57 @@
 // omr.js — OMR image processing engine
 //
-// GES_TEMPLATE is gone. Templates are now calibrated by the user and stored
-// in IndexedDB. This file provides:
-//   • GES_STRUCTURE  — the fixed grid structure (normalised 0–1 coordinates)
-//   • buildComputedTemplate(storedTemplate)  — converts anchors → processable template
-//   • processSheet, drawDebugOverlay, and result-rendering helpers
+// Supports two template schemas:
+//   LEGACY: { anchors:{tl,tr,bl,br}, sampleRadius, fillThreshold }
+//   CURRENT: { rowYs, colGroups:[{optionXs}], cellW, cellH, fillThreshold }
+//
+// resolveTemplate() normalises either schema into a computed template.
 
-// ── GES Grid Structure ────────────────────────────────────────────
-// Normalised coordinates derived from the real GES answer sheet.
-// These encode the relative positions of rows and bubble options
-// WITHIN the answer grid (0 = top/left edge, 1 = bottom/right edge).
-// They are fixed by the sheet design and never change.
-
+// ── GES Grid Structure (normalised, used by legacy schema only) ───
 const GES_STRUCTURE = {
   columns:       3,
   rowsPerColumn: 20,
   optionsPerRow: 4,
-
-  // Y position of each row, normalised between first-row-top (0) and last-row-bottom (1).
-  // The non-linear spacing preserves the 5-question groups separated by narrow gaps.
   normalizedRowYs: [
-    0.0000, 0.0450, 0.0897, 0.1312, 0.1759,   // Q1–5
-    0.2830, 0.3311, 0.3795, 0.4277, 0.4726,   // Q6–10
-    0.5551, 0.6001, 0.6485, 0.6966, 0.7450,   // Q11–15
-    0.8104, 0.8588, 0.9069, 0.9553, 1.0000,   // Q16–20
+    0.0000, 0.0450, 0.0897, 0.1312, 0.1759,
+    0.2830, 0.3311, 0.3795, 0.4277, 0.4726,
+    0.5551, 0.6001, 0.6485, 0.6966, 0.7450,
+    0.8104, 0.8588, 0.9069, 0.9553, 1.0000,
   ],
-
-  // X position of each option [A,B,C,D] within each column,
-  // normalised between leftmost bubble (0) and rightmost bubble (1).
   normalizedBubbleXs: [
-    [0.0000, 0.0626, 0.1250, 0.1876],  // column 1 (Q1–20)
-    [0.3876, 0.4500, 0.5200, 0.5900],  // column 2 (Q21–40)
-    [0.7875, 0.8575, 0.9326, 1.0000],  // column 3 (Q41–60)
+    [0.0000, 0.0626, 0.1250, 0.1876],
+    [0.3876, 0.4500, 0.5200, 0.5900],
+    [0.7875, 0.8575, 0.9326, 1.0000],
   ],
 };
 
-// ── Template interpolation ────────────────────────────────────────
-// Takes a stored template (with 4 anchor points) and produces
-// a computed template that processSheet() can consume directly.
-//
-// The 4 anchors define the corners of the answer grid as fractions
-// of the captured sheet image:
-//   tl = Q1, column 1, option A  (top-left  of answer grid)
-//   tr = Q1, column 3, option D  (top-right of answer grid)
-//   bl = Q20, column 1, option A (bottom-left  of answer grid)
-//   br = Q20, column 3, option D (bottom-right of answer grid)
+// ── Template resolution ───────────────────────────────────────────
+// Converts any stored template into the standard computed form
+// used by processSheet(). Call this once when a session starts.
 
+function resolveTemplate(storedTemplate) {
+  // ── Current schema ──
+  if (storedTemplate.rowYs && storedTemplate.colGroups) {
+    return {
+      rowYs:         storedTemplate.rowYs,
+      columns:       storedTemplate.colGroups.map(g => ({ bubbleXs: g.optionXs })),
+      cellW:         storedTemplate.cellW         ?? 0.04,
+      cellH:         storedTemplate.cellH         ?? 0.018,
+      fillThreshold: storedTemplate.fillThreshold ?? 0.28,
+    };
+  }
+
+  // ── Legacy schema (anchors) ──
+  if (storedTemplate.anchors) {
+    return buildComputedTemplate(storedTemplate);
+  }
+
+  throw new Error('Unknown template schema');
+}
+
+// Legacy interpolation path (kept for backward compatibility)
 function buildComputedTemplate(storedTemplate) {
   const { tl, tr, bl, br } = storedTemplate.anchors;
 
-  // Bilinear interpolation — correctly handles slight perspective warp.
-  // s=0 is left edge, s=1 is right edge.
-  // t=0 is top edge (row 1), t=1 is bottom edge (row 20).
   function bilerp(s, t) {
     return {
       x: (1-s)*(1-t)*tl.x + s*(1-t)*tr.x + (1-s)*t*bl.x + s*t*br.x,
@@ -59,30 +59,24 @@ function buildComputedTemplate(storedTemplate) {
     };
   }
 
-  // Row Y values: average of left-edge and right-edge Y at each normalised row position.
-  // Averaging the two edges accounts for slight horizontal perspective.
   const rowYs = GES_STRUCTURE.normalizedRowYs.map(t => {
-    const leftY  = bilerp(0, t).y;
-    const rightY = bilerp(1, t).y;
-    return (leftY + rightY) / 2;
+    return ((bilerp(0, t).y + bilerp(1, t).y) / 2);
   });
 
-  // Column bubble X values: average of top-edge and bottom-edge X at each normalised
-  // bubble position. Averaging accounts for slight vertical perspective.
   const columns = GES_STRUCTURE.normalizedBubbleXs.map(colXs => {
-    const bubbleXs = colXs.map(s => {
-      const topX    = bilerp(s, 0).x;
-      const bottomX = bilerp(s, 1).x;
-      return (topX + bottomX) / 2;
-    });
+    const bubbleXs = colXs.map(s => (bilerp(s, 0).x + bilerp(s, 1).x) / 2);
     return { bubbleXs };
   });
 
+  // Legacy uses circular sampling radius
+  const radius = storedTemplate.sampleRadius ?? 0.022;
   return {
     rowYs,
     columns,
-    sampleRadius:   storedTemplate.sampleRadius  ?? 0.022,
-    fillThreshold:  storedTemplate.fillThreshold ?? 0.28,
+    cellW:         radius,
+    cellH:         radius,
+    fillThreshold: storedTemplate.fillThreshold ?? 0.28,
+    _legacyCircle: true,  // flag to keep circular sampling for old templates
   };
 }
 
@@ -92,12 +86,29 @@ function toGrayscale(imageData) {
   const { data, width, height } = imageData;
   const gray = new Uint8Array(width * height);
   for (let i = 0; i < gray.length; i++) {
-    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
-    gray[i] = (r * 77 + g * 150 + b * 29) >> 8; // fast luma
+    const r = data[i*4], g = data[i*4+1], b = data[i*4+2];
+    gray[i] = (r*77 + g*150 + b*29) >> 8;
   }
   return gray;
 }
 
+// Rectangular sampler — matches the [A][B][C][D] box shape
+function sampleRect(gray, imgW, imgH, cx, cy, halfW, halfH) {
+  const x0 = Math.max(0, Math.round(cx - halfW));
+  const x1 = Math.min(imgW - 1, Math.round(cx + halfW));
+  const y0 = Math.max(0, Math.round(cy - halfH));
+  const y1 = Math.min(imgH - 1, Math.round(cy + halfH));
+  let dark = 0, total = 0;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      total++;
+      if (gray[y * imgW + x] < 128) dark++;
+    }
+  }
+  return total > 0 ? dark / total : 0;
+}
+
+// Legacy circular sampler (kept for backward-compat with old templates)
 function sampleBubble(gray, imgW, imgH, cx, cy, radius) {
   let dark = 0, total = 0;
   const r2 = radius * radius;
@@ -105,8 +116,7 @@ function sampleBubble(gray, imgW, imgH, cx, cy, radius) {
   const y0 = Math.max(0, cy - radius), y1 = Math.min(imgH - 1, cy + radius);
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
-      const dx = x - cx, dy = y - cy;
-      if (dx * dx + dy * dy <= r2) {
+      if ((x-cx)**2 + (y-cy)**2 <= r2) {
         total++;
         if (gray[y * imgW + x] < 128) dark++;
       }
@@ -115,22 +125,22 @@ function sampleBubble(gray, imgW, imgH, cx, cy, radius) {
   return total > 0 ? dark / total : 0;
 }
 
-// computedTemplate is the output of buildComputedTemplate()
 function processSheet(dataUrl, computedTemplate, questionCount) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
       canvas.width = img.width; canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, img.width, img.height);
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      const imageData = canvas.getContext('2d').getImageData(0, 0, img.width, img.height);
       const gray = toGrayscale(imageData);
       const W = img.width, H = img.height;
 
       const answers = [], bubbleMap = [];
-      const radius  = Math.round(computedTemplate.sampleRadius * W);
       const letters = ['A', 'B', 'C', 'D'];
+      const useCircle = computedTemplate._legacyCircle;
+      const halfW  = Math.round(computedTemplate.cellW * W);
+      const halfH  = Math.round(computedTemplate.cellH * H);
 
       for (let q = 0; q < questionCount; q++) {
         const colIndex = Math.floor(q / 20);
@@ -141,18 +151,22 @@ function processSheet(dataUrl, computedTemplate, questionCount) {
         const cy  = Math.round(computedTemplate.rowYs[rowIndex] * H);
         const col = computedTemplate.columns[colIndex];
 
-        const darknesses = col.bubbleXs.map(xFrac =>
-          sampleBubble(gray, W, H, Math.round(xFrac * W), cy, radius)
-        );
+        const darknesses = col.bubbleXs.map(xFrac => {
+          const cx = Math.round(xFrac * W);
+          return useCircle
+            ? sampleBubble(gray, W, H, cx, cy, halfW)
+            : sampleRect(gray, W, H, cx, cy, halfW, halfH);
+        });
+
         const filled     = darknesses.map((d, i) => ({
           letter: letters[i], darkness: d, filled: d >= computedTemplate.fillThreshold,
         }));
         const filledOnes = filled.filter(b => b.filled);
 
         let answer;
-        if (filledOnes.length === 0)    answer = 'BLANK';
-        else if (filledOnes.length > 1) answer = 'DOUBLE';
-        else                            answer = filledOnes[0].letter;
+        if      (filledOnes.length === 0) answer = 'BLANK';
+        else if (filledOnes.length >  1)  answer = 'DOUBLE';
+        else                              answer = filledOnes[0].letter;
 
         answers.push(answer);
         bubbleMap.push({
@@ -160,6 +174,7 @@ function processSheet(dataUrl, computedTemplate, questionCount) {
           bubbles: col.bubbleXs.map((xFrac, i) => ({
             cx: Math.round(xFrac * W), cy,
             letter: letters[i], darkness: darknesses[i], filled: filled[i].filled,
+            halfW, halfH,
           })),
           answer,
         });
@@ -170,6 +185,9 @@ function processSheet(dataUrl, computedTemplate, questionCount) {
     img.src = dataUrl;
   });
 }
+
+// ── Debug overlay ─────────────────────────────────────────────────
+// Draws RECTANGLES instead of circles to match the [A][B][C][D] format
 
 function drawDebugOverlay(dataUrl, bubbleMap, width, height, computedTemplate) {
   return new Promise(resolve => {
@@ -182,24 +200,33 @@ function drawDebugOverlay(dataUrl, bubbleMap, width, height, computedTemplate) {
       canvas.height = Math.round(height * scale);
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      const r = Math.round((computedTemplate.sampleRadius || 0.022) * width * scale);
+
+      const useCircle = computedTemplate._legacyCircle;
+      const halfW = Math.round((computedTemplate.cellW || 0.022) * width  * scale);
+      const halfH = Math.round((computedTemplate.cellH || 0.022) * height * scale);
 
       bubbleMap.forEach(row => {
         row.bubbles.forEach(b => {
           const cx = Math.round(b.cx * scale);
           const cy = Math.round(b.cy * scale);
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          let color;
           if (b.letter === row.answer && row.answer !== 'BLANK' && row.answer !== 'DOUBLE') {
-            ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 2.5;
+            color = '#22c55e'; ctx.lineWidth = 2.5;
           } else if (row.answer === 'DOUBLE') {
-            ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2;
+            color = '#f59e0b'; ctx.lineWidth = 2;
           } else if (row.answer === 'BLANK') {
-            ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 1.5;
+            color = '#f59e0b'; ctx.lineWidth = 1.5;
           } else {
-            ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1;
+            color = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1;
           }
-          ctx.stroke();
+          ctx.strokeStyle = color;
+          if (useCircle) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, halfW, 0, Math.PI * 2);
+            ctx.stroke();
+          } else {
+            ctx.strokeRect(cx - halfW, cy - halfH, halfW * 2, halfH * 2);
+          }
         });
       });
       resolve();
@@ -230,8 +257,8 @@ function renderResultAnswers(answers, key) {
 }
 
 function buildResultFlagsMessage(answers) {
-  const blanks  = answers.map((a, i) => a === 'BLANK'  ? `Q${i+1}` : null).filter(Boolean);
-  const doubles = answers.map((a, i) => a === 'DOUBLE' ? `Q${i+1}` : null).filter(Boolean);
+  const blanks  = answers.map((a,i) => a==='BLANK'  ? `Q${i+1}` : null).filter(Boolean);
+  const doubles = answers.map((a,i) => a==='DOUBLE' ? `Q${i+1}` : null).filter(Boolean);
   let msg = '⚠️ ';
   if (doubles.length) msg += `Double-shaded: ${doubles.join(', ')}. `;
   if (blanks.length)  msg += `No answer detected: ${blanks.join(', ')}.`;

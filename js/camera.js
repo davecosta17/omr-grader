@@ -1,22 +1,21 @@
-// camera.js — camera hardware, capture, preview, and session management
+// camera.js — camera hardware, capture, preview, session management
 
-let gradingExam     = null;
-let sessionResults  = [];
+let gradingExam    = null;
+let sessionResults = [];
 let capturedDataUrl = null;
-let cameraStream    = null;
-let torchOn         = false;
-let guideRect       = null;
-let cameraMode      = 'grading'; // 'grading' | 'calibration'
-
-// ── Screen helpers ────────────────────────────────────────────────
-// Camera/calibration/result screens are full-screen overlays.
-// They don't use showScreen() because they stack over the normal flow.
-// We hide the normal screens explicitly so nothing bleeds through.
+let fullFrameDataUrl = null;  // full camera frame (before any crop) for corner-adjust
+let cameraStream   = null;
+let torchOn        = false;
+let guideRect      = null;
+let cameraMode     = 'grading';  // 'grading' | 'calibration'
+let gradingAdjust  = false;      // whether grading mode uses corner-adjust
 
 const NORMAL_SCREENS = ['screen-home', 'screen-create'];
 
+// ── Screen helpers ────────────────────────────────────────────────
+
 function hideNormalScreens() {
-  NORMAL_SCREENS.forEach(id => $( id).classList.remove('active'));
+  NORMAL_SCREENS.forEach(id => $(id).classList.remove('active'));
 }
 
 function showCameraScreen() {
@@ -35,39 +34,31 @@ function hideCameraScreen() {
 async function startGradingSession() {
   const id = actionSheetExamId;
   closeActionSheet();
-
   try {
     const exam = await dbGet(id);
     if (!exam) return;
-
     if (!exam.templateId) {
-      showToast('This exam has no template. Please edit it and select one.', true);
-      return;
+      showToast('This exam has no template. Edit it and select one.', true); return;
     }
-    const storedTemplate = await dbGetTemplate(exam.templateId);
-    if (!storedTemplate) {
-      showToast('Template not found. Please re-calibrate.', true);
-      return;
+    const stored = await dbGetTemplate(exam.templateId);
+    if (!stored) {
+      showToast('Template not found. Please re-calibrate.', true); return;
     }
-
-    gradingExam = {
-      ...exam,
-      computedTemplate: buildComputedTemplate(storedTemplate),
-    };
+    gradingExam = { ...exam, resolvedTemplate: resolveTemplate(stored) };
     sessionResults  = [];
     capturedDataUrl = null;
     cameraMode      = 'grading';
+    gradingAdjust   = false;
 
-    $('cam-exam-name').textContent     = exam.name;
-    $('cam-exam-sub').textContent      = `${exam.questionCount} questions`;
-    $('cam-counter').style.visibility  = 'visible';
+    $('cam-exam-name').textContent    = exam.name;
+    $('cam-exam-sub').textContent     = `${exam.questionCount} questions`;
+    $('cam-counter').style.visibility = 'visible';
     updateCamCounter();
     updateFinishBtn();
-
     showCameraScreen();
     await initCamera();
   } catch (err) {
-    console.error('startGradingSession error:', err);
+    console.error('startGradingSession:', err);
     showToast('Could not start session: ' + (err.message || err), true);
   }
 }
@@ -93,7 +84,7 @@ function finishSession() {
 function startCalibrationCapture() {
   cameraMode = 'calibration';
   $('cam-exam-name').textContent    = 'Calibrate Sheet';
-  $('cam-exam-sub').textContent     = 'Capture a blank answer sheet';
+  $('cam-exam-sub').textContent     = 'Capture the answer grid';
   $('cam-counter').style.visibility = 'hidden';
   $('btn-cam-finish').classList.remove('visible');
   showCameraScreen();
@@ -106,7 +97,6 @@ async function initCamera() {
   const video = $('cam-video');
   const errEl = $('cam-error');
   errEl.classList.remove('visible');
-
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
@@ -132,10 +122,6 @@ function stopCamera() {
   $('btn-cam-finish').classList.remove('visible');
   $('cam-counter').style.visibility = 'visible';
   hideCameraScreen();
-
-  // Restore the last normal screen
-  const wasOnCreate = editingId !== null || (typeof currentExam === 'object' && currentExam && $('screen-create').style.display !== 'none');
-  // Always return to home — if mid-exam-creation the exam form will have been shown separately
   $('screen-home').classList.add('active');
 }
 
@@ -144,10 +130,10 @@ function stopCamera() {
 function positionGuide() {
   const vp  = $('cam-viewport');
   const vpW = vp.clientWidth, vpH = vp.clientHeight;
-  const guideW = Math.round(vpW * 0.88);
-  const guideH = Math.round(guideW * 1.35);
+  const guideW = Math.round(vpW * 0.92);
+  const guideH = Math.round(guideW * 0.72);  // landscape-ish for answer grid
   const guideX = Math.round((vpW - guideW) / 2);
-  const guideY = Math.round((vpH - guideH) / 2) - 20;
+  const guideY = Math.round((vpH - guideH) / 2) - 10;
 
   guideRect = { x: guideX, y: guideY, w: guideW, h: guideH };
 
@@ -163,7 +149,7 @@ function positionGuide() {
     'corner-br': { top: guideY+guideH-22,   left: guideX+guideW-22 },
   };
   Object.entries(corners).forEach(([id, pos]) => {
-    $(id).style.top = pos.top + 'px'; $(id).style.left = pos.left + 'px';
+    $(id).style.top = pos.top+'px'; $(id).style.left = pos.left+'px';
   });
   $('cam-guide-label').style.top = (guideY + guideH + 10) + 'px';
 }
@@ -181,7 +167,7 @@ async function toggleFlash() {
   if (caps.torch) {
     torchOn = !torchOn;
     try { await track.applyConstraints({ advanced: [{ torch: torchOn }] }); btn.classList.toggle('on', torchOn); }
-    catch (e) { console.warn('Torch error:', e); }
+    catch(e) { console.warn('Torch:', e); }
   } else {
     torchOn = !torchOn;
     btn.classList.toggle('on', torchOn);
@@ -194,7 +180,7 @@ async function toggleFlash() {
 function capturePhoto() {
   const video  = $('cam-video');
   const canvas = $('cam-canvas');
-  if (!video.srcObject || video.readyState < 2) { showToast('Camera not ready yet', true); return; }
+  if (!video.srcObject || video.readyState < 2) { showToast('Camera not ready', true); return; }
 
   const flashEl = $('cam-flash');
   flashEl.classList.add('flash');
@@ -204,27 +190,30 @@ function capturePhoto() {
   canvas.width = vw; canvas.height = vh;
   canvas.getContext('2d').drawImage(video, 0, 0, vw, vh);
 
+  // Always store the full frame for corner-adjust
+  fullFrameDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+
+  // Also compute guide crop for normal grading flow
   const vp = $('cam-viewport');
   const vpW = vp.clientWidth, vpH = vp.clientHeight;
   const videoAspect = vw/vh, vpAspect = vpW/vpH;
   let dispW, dispH, offsetX, offsetY;
   if (videoAspect > vpAspect) {
-    dispH = vpH; dispW = vpH * videoAspect; offsetX = (dispW-vpW)/2; offsetY = 0;
+    dispH = vpH; dispW = vpH*videoAspect; offsetX = (dispW-vpW)/2; offsetY = 0;
   } else {
     dispW = vpW; dispH = vpW/videoAspect; offsetX = 0; offsetY = (dispH-vpH)/2;
   }
-
   const scaleX = vw/dispW, scaleY = vh/dispH;
-  const cropX  = Math.round((guideRect.x+offsetX)*scaleX);
-  const cropY  = Math.round((guideRect.y+offsetY)*scaleY);
-  const cropW  = Math.round(guideRect.w*scaleX);
-  const cropH  = Math.round(guideRect.h*scaleY);
+  const cropX = Math.round((guideRect.x+offsetX)*scaleX);
+  const cropY = Math.round((guideRect.y+offsetY)*scaleY);
+  const cropW = Math.round(guideRect.w*scaleX);
+  const cropH = Math.round(guideRect.h*scaleY);
 
   const cc = document.createElement('canvas');
   cc.width = cropW; cc.height = cropH;
   cc.getContext('2d').drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-
   capturedDataUrl = cc.toDataURL('image/jpeg', 0.92);
+
   $('cam-thumb').innerHTML = `<img src="${capturedDataUrl}" alt="last">`;
   showPreviewScreen(capturedDataUrl);
 }
@@ -245,19 +234,49 @@ function retakePhoto() { hidePreviewScreen(); }
 
 function usePhoto() {
   if (!capturedDataUrl) return;
-  const dataUrl = capturedDataUrl;
-  // Stop the live camera stream before showing calibration — saves battery
-  // and avoids two screens fighting for the camera
-  if (cameraStream) {
-    cameraStream.getTracks().forEach(t => t.stop());
-    cameraStream = null;
-  }
+  const cropUrl = capturedDataUrl;
+  const fullUrl = fullFrameDataUrl;
+
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
   hidePreviewScreen();
   hideCameraScreen();
 
   if (cameraMode === 'calibration') {
-    showCalibrationScreen(dataUrl, calibOnSave); // calibration.js
+    // Always use corner-adjust for calibration.
+    // Try OpenCV auto-detection first; if it loads fast enough the handles
+    // snap to the detected corners, otherwise start at the image edges.
+    showCornerAdjust(
+      fullUrl,
+      (warpedUrl) => showCalibrationScreen(warpedUrl, calibOnSave), // onConfirm
+      () => { $('screen-home').classList.add('active'); },          // onCancel
+      true  // autoDetect = try OpenCV edge detection
+    );
+  } else if (gradingAdjust) {
+    // Grading with manual border adjustment
+    showCornerAdjust(
+      fullUrl,
+      (warpedUrl) => showResultScreen(warpedUrl),  // onConfirm
+      () => { showCameraScreen(); initCamera(); }, // onCancel
+      false
+    );
   } else {
-    showResultScreen(dataUrl); // results.js
+    // Fast path: use the guide-cropped image directly
+    showResultScreen(cropUrl);
   }
+}
+
+// ── Show corner-adjust for current grading sheet ──────────────────
+// Called from the preview screen "Adjust" button
+function adjustAndGrade() {
+  if (!fullFrameDataUrl) return;
+  const fullUrl = fullFrameDataUrl;
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  hidePreviewScreen();
+  hideCameraScreen();
+  showCornerAdjust(
+    fullUrl,
+    (warpedUrl) => showResultScreen(warpedUrl),
+    () => { showCameraScreen(); initCamera(); },
+    false
+  );
 }

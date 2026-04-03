@@ -20,7 +20,7 @@ async function showResultScreen(dataUrl) {
 
   try {
     const qCount           = gradingExam.questionCount;
-    const computedTemplate = gradingExam.computedTemplate;
+    const computedTemplate = gradingExam.resolvedTemplate || gradingExam.computedTemplate;
 
     if (!computedTemplate) {
       throw new Error('No template for this exam. Edit the exam and select a template.');

@@ -773,3 +773,106 @@ body {
   flex-shrink: 0;
   letter-spacing: 0.02em;
 }
+
+/* ── CORNER ADJUST SCREEN ──────────────────── */
+#screen-corner-adjust {
+  display: none;
+  flex-direction: column;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #000;
+  z-index: 210;
+  overflow: hidden;
+}
+#screen-corner-adjust.active { display: flex; }
+
+.cadj-topbar {
+  background: var(--navy); color: #fff;
+  padding: 0 16px; height: 60px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 12px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+}
+.cadj-topbar-info { flex: 1; min-width: 0; }
+.cadj-topbar-title { font-size: 15px; font-weight: 700; }
+.cadj-topbar-sub {
+  font-size: 11px; color: var(--aqua); opacity: 0.9;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.cadj-workspace {
+  flex: 1; position: relative; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+#cadj-canvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.cadj-bottom {
+  background: var(--white);
+  border-top: 1px solid var(--lav-dark);
+  padding: 12px 16px 32px;
+  display: flex; gap: 10px;
+  flex-shrink: 0;
+}
+.cadj-bottom .btn-secondary { flex: 1; }
+.cadj-bottom .btn-save      { flex: 2; }
+
+/* ── OPENCV LOADING SCREEN ─────────────────── */
+#screen-opencv-loading {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--navy);
+  z-index: 500;
+  overflow: hidden;
+}
+#screen-opencv-loading.active { display: flex; }
+
+.opencv-loading-inner {
+  display: flex; flex-direction: column;
+  align-items: center; text-align: center;
+  padding: 32px 24px; max-width: 320px; width: 100%;
+}
+.opencv-loading-icon  { font-size: 48px; margin-bottom: 16px; }
+.opencv-loading-title {
+  font-size: 20px; font-weight: 700; color: #fff; margin-bottom: 8px;
+}
+.opencv-loading-label {
+  font-size: 13px; color: rgba(255,255,255,0.7);
+  margin-bottom: 20px; line-height: 1.5;
+}
+.opencv-progress-bar {
+  width: 100%; height: 6px; background: rgba(255,255,255,0.15);
+  border-radius: 3px; overflow: hidden; margin-bottom: 8px;
+  position: relative;
+}
+.opencv-progress-fill {
+  height: 100%; background: var(--aqua);
+  border-radius: 3px; width: 0%;
+  transition: width 0.2s ease;
+}
+.opencv-progress-pct {
+  font-family: 'Space Mono', monospace;
+  font-size: 12px; color: var(--aqua); margin-bottom: 16px;
+}
+.opencv-note {
+  font-size: 11px; color: rgba(255,255,255,0.4);
+  margin-top: 20px; line-height: 1.6;
+}
+
+/* ── PREVIEW: 3-button layout ──────────────── */
+.preview-actions { display: flex; gap: 8px; }
+.btn-adjust {
+  flex: 0.6;
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+  border: 1.5px solid rgba(255,255,255,0.25);
+  font-size: 13px;
+}
