@@ -1,19 +1,28 @@
 // opencv-loader.js — loads OpenCV.js and signals when ready
 //
-// @techstark/opencv-js exposes window.cv as an Emscripten thenable —
-// NOT a real Promise. The correct call is the two-argument form:
-//   window.cv.then(onSuccess, onError)
-// Chaining (.then().catch()) fails because .then() returns undefined.
-// We also wrap in Promise.resolve() as a belt-and-suspenders measure
-// so we get a real chainable Promise regardless of build variant.
+// IMPORTANT URL NOTE:
+// @techstark/opencv-js dist/opencv.min.js is an ES module — it does NOT
+// set window.cv as a global. Use the non-minified opencv.js (UMD build)
+// which correctly exposes window.cv as a global thenable.
+//
+// IMPORTANT SCREEN NOTE:
+// loadOpenCV() is called from deep inside warp.js → detectSheetCorners()
+// which is called while screen-corner-adjust is active. The loading screen
+// must NOT hide screen-corner-adjust, and must restore it on completion.
+// We do this by recording which screen was active before showing the loader,
+// and restoring it afterwards.
 
 let cv            = null;
 let cvLoading     = false;
 let cvLoaded      = false;
 let cvLoadPromise = null;
 
+// UMD build — sets window.cv as a global. The .min.js is ES module only.
 const OPENCV_URL =
-  'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.12.0-release.1/dist/opencv.min.js';
+  'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.12.0-release.1/dist/opencv.js';
+
+// The screen that was active when loadOpenCV() was called — restored after.
+let screenToRestore = null;
 
 function loadOpenCV() {
   if (cvLoaded && cv) return Promise.resolve(cv);
@@ -23,28 +32,26 @@ function loadOpenCV() {
     cvLoading = true;
     showOpenCVLoadingScreen();
 
-    // Do NOT set window.Module — techstark ignores it and uses cv.then() instead.
-
     const script = document.createElement('script');
     script.src         = OPENCV_URL;
     script.crossOrigin = 'anonymous';
 
     script.onload = () => {
-      // window.cv is now an Emscripten thenable. Wrap it in a real Promise
-      // so we can chain properly. Promise.resolve(thenable) follows the
-      // thenable spec-correctly, calling thenable.then(resolve, reject)
-      // and returning a genuine Promise.
+      // The UMD build sets window.cv to a thenable.
+      // Promise.resolve(thenable) wraps it into a real Promise.
+      // Use two-argument .then(onFulfilled, onRejected) — do not chain .catch()
+      // because the intermediate Promise from a thenable may not support it.
       Promise.resolve(window.cv).then(
         instance => {
           cv        = instance;
           cvLoaded  = true;
           cvLoading = false;
-          hideOpenCVLoadingScreen();
+          hideOpenCVLoadingScreen();   // restores previous screen
           resolve(cv);
         },
         err => {
-          onOpenCVFail('Init failed: ' + (err && err.message ? err.message : err));
-          reject(err);
+          onOpenCVFail('Init failed: ' + (err && err.message ? err.message : String(err)));
+          reject(err instanceof Error ? err : new Error(String(err)));
         }
       );
     };
@@ -65,20 +72,37 @@ function getCv() { return cvLoaded ? cv : null; }
 // ── Loading screen UI ─────────────────────────────────────────────
 
 function showOpenCVLoadingScreen() {
+  // Record whichever overlay screen is currently active so we can restore it.
+  // We check the overlay screens only — home/create are normal screens
+  // and are handled by their own show/hide logic.
+  const overlays = [
+    'screen-corner-adjust',
+    'screen-calibration',
+    'screen-camera',
+    'screen-result',
+  ];
+  screenToRestore = null;
+  for (const id of overlays) {
+    const el = document.getElementById(id);
+    if (el && el.classList.contains('active')) {
+      screenToRestore = id;
+      break;
+    }
+  }
+
+  // Show loading screen on top — its z-index (500) is above everything.
+  // We do NOT remove active from other screens; the loading screen
+  // just sits over them. When it hides, the screens beneath are still there.
   $('screen-opencv-loading').classList.add('active');
   updateOpenCVProgress(-1);
-  setOpenCVLoadingLabel('Loading vision engine… (one-time download, ~8 MB)');
-  ['screen-home','screen-create','screen-camera',
-   'screen-calibration','screen-corner-adjust'].forEach(id => {
-    const el = $(id);
-    if (el) el.classList.remove('active');
-  });
+  setOpenCVLoadingLabel('Loading vision engine… (one-time download)');
 }
 
 function hideOpenCVLoadingScreen() {
   $('screen-opencv-loading').classList.remove('active');
   clearInterval(indeterminateTimer);
   indeterminateTimer = null;
+  // No need to restore anything — we never hid other screens.
 }
 
 let indeterminateTimer = null;
@@ -117,7 +141,11 @@ function onOpenCVFail(reason) {
   clearInterval(indeterminateTimer);
   indeterminateTimer = null;
   const bar = $('opencv-progress-fill');
-  if (bar) { bar.style.marginLeft = '0'; bar.style.width = '100%'; bar.style.background = '#ef4444'; }
+  if (bar) {
+    bar.style.marginLeft = '0';
+    bar.style.width      = '100%';
+    bar.style.background = '#ef4444';
+  }
   setOpenCVLoadingLabel('Failed: ' + reason);
   const btn = $('btn-opencv-retry');
   if (btn) btn.style.display = 'inline-flex';
