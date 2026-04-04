@@ -1,15 +1,11 @@
-// opencv-loader.js — lazy loads OpenCV.js with progress UI
-// OpenCV is ~8MB, downloaded once and cached by the browser.
-// Call loadOpenCV() to start; it shows a loading screen automatically.
+// opencv-loader.js — loads OpenCV.js and signals when ready
 //
-// Why new Function() instead of blob script injection:
-// Script tag injection (script.src = blobUrl) is ASYNC — the script runs
-// on a future event loop tick and immediately overwrites any window.cv we
-// pre-seeded, silently discarding our callback. No error, just silence.
-//
-// new Function(text)() executes synchronously, so window.Module is already
-// set when Emscripten reads it at the very top of the script. Our
-// onRuntimeInitialized reference is captured before it can be overwritten.
+// Strategy: plain <script> tag, no XHR, no blob, no new Function().
+// Every XHR+blob approach breaks because the library was designed to run
+// as a normal script — WASM path resolution, Module hooks, and init all
+// depend on the browser's standard script loading environment.
+// We lose per-byte progress but gain reliable initialisation.
+// The loading screen shows an indeterminate animation while waiting.
 
 let cv            = null;
 let cvLoading     = false;
@@ -26,67 +22,71 @@ function loadOpenCV() {
   cvLoadPromise = new Promise((resolve, reject) => {
     cvLoading = true;
     showOpenCVLoadingScreen();
+    updateOpenCVProgress(-1); // indeterminate animation
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', OPENCV_URL, true);
-    xhr.responseType = 'arraybuffer';
-
-    xhr.onprogress = e => {
-      if (e.lengthComputable) {
-        updateOpenCVProgress(e.loaded / e.total);
-      } else {
-        updateOpenCVProgress(-1);
-      }
+    // Set Module callback BEFORE appending the script tag so Emscripten
+    // captures our onRuntimeInitialized at module parse time.
+    window.Module = {
+      onRuntimeInitialized() {
+        cv        = window.cv;
+        cvLoaded  = true;
+        cvLoading = false;
+        clearTimeout(loadTimeout);
+        clearInterval(initPoll);
+        hideOpenCVLoadingScreen();
+        resolve(cv);
+      },
     };
 
-    xhr.onload = () => {
-      if (xhr.status !== 200) {
-        onOpenCVFail(`HTTP ${xhr.status}`);
-        reject(new Error(`OpenCV load failed: HTTP ${xhr.status}`));
-        return;
-      }
+    // Overall load timeout (60 s) — fires if the CDN is unreachable
+    const loadTimeout = setTimeout(() => {
+      onOpenCVFail('Timed out — check your connection and retry');
+      reject(new Error('OpenCV load timeout'));
+    }, 60000);
 
-      updateOpenCVProgress(1);
-      setOpenCVLoadingLabel('Initialising…');
+    let initPoll; // declared here so onload can clear it too
 
-      try {
-        // Decode arraybuffer → text
-        const scriptText = new TextDecoder().decode(xhr.response);
+    const script = document.createElement('script');
+    script.src         = OPENCV_URL;
+    script.crossOrigin = 'anonymous';
 
-        // Set window.Module BEFORE executing the script.
-        // Emscripten reads window.Module at the very start of execution to
-        // find callbacks. Because new Function() runs synchronously, our
-        // Module object is already in place when the script captures it.
-        window.Module = {
-          onRuntimeInitialized() {
-            // This fires once WASM compilation finishes.
-            // window.cv is now the fully initialised OpenCV object.
+    script.onload = () => {
+      // Script has executed. onRuntimeInitialized may have already fired
+      // (synchronous builds) or will fire shortly (async WASM builds).
+      // Poll as a fallback — some builds init synchronously and don't
+      // call onRuntimeInitialized at all; checking cv.Mat is the safest
+      // universal signal that OpenCV is fully ready.
+      if (cvLoaded) return; // already resolved via onRuntimeInitialized
+
+      let polls = 0;
+      initPoll = setInterval(() => {
+        polls++;
+        if (window.cv && window.cv.Mat) {
+          clearInterval(initPoll);
+          clearTimeout(loadTimeout);
+          if (!cvLoaded) {
             cv        = window.cv;
             cvLoaded  = true;
             cvLoading = false;
             hideOpenCVLoadingScreen();
             resolve(cv);
-          },
-        };
-
-        // Execute synchronously in global scope.
-        // new Function() creates a function in global scope — correct for
-        // scripts that assign to window.cv and read window.Module.
-        // eslint-disable-next-line no-new-func
-        new Function(scriptText)();
-
-      } catch (err) {
-        onOpenCVFail('Execution failed: ' + (err.message || err));
-        reject(err);
-      }
+          }
+        } else if (polls > 200) { // 20 s polling window
+          clearInterval(initPoll);
+          clearTimeout(loadTimeout);
+          onOpenCVFail('Initialisation timed out — retry or reload');
+          reject(new Error('OpenCV init timeout'));
+        }
+      }, 100);
     };
 
-    xhr.onerror = () => {
-      onOpenCVFail('Network error — check your connection');
-      reject(new Error('OpenCV network error'));
+    script.onerror = () => {
+      clearTimeout(loadTimeout);
+      onOpenCVFail('Failed to load script from CDN');
+      reject(new Error('Script load error'));
     };
 
-    xhr.send();
+    document.head.appendChild(script);
   });
 
   return cvLoadPromise;
@@ -98,8 +98,8 @@ function getCv() { return cvLoaded ? cv : null; }
 
 function showOpenCVLoadingScreen() {
   $('screen-opencv-loading').classList.add('active');
-  updateOpenCVProgress(0);
-  setOpenCVLoadingLabel('Downloading vision engine… (one-time, ~8 MB)');
+  updateOpenCVProgress(-1);
+  setOpenCVLoadingLabel('Loading vision engine… (one-time download)');
   ['screen-home','screen-create','screen-camera',
    'screen-calibration','screen-corner-adjust'].forEach(id => {
     const el = $(id);
@@ -109,6 +109,8 @@ function showOpenCVLoadingScreen() {
 
 function hideOpenCVLoadingScreen() {
   $('screen-opencv-loading').classList.remove('active');
+  clearInterval(indeterminateTimer);
+  indeterminateTimer = null;
 }
 
 let indeterminateTimer = null;
@@ -118,6 +120,7 @@ function updateOpenCVProgress(fraction) {
   if (!bar || !label) return;
 
   if (fraction < 0) {
+    // Indeterminate sweep animation
     if (!indeterminateTimer) {
       let pos = 0;
       indeterminateTimer = setInterval(() => {
@@ -126,13 +129,13 @@ function updateOpenCVProgress(fraction) {
         bar.style.marginLeft = pos + '%';
       }, 30);
     }
-    label.textContent = 'Downloading…';
+    label.textContent = 'Loading…';
   } else {
     clearInterval(indeterminateTimer);
     indeterminateTimer = null;
     bar.style.marginLeft = '0';
     bar.style.width      = Math.round(fraction * 100) + '%';
-    label.textContent    = fraction >= 1 ? '100%' : Math.round(fraction * 100) + '%';
+    label.textContent    = fraction >= 1 ? 'Ready' : Math.round(fraction * 100) + '%';
   }
 }
 
@@ -143,8 +146,12 @@ function setOpenCVLoadingLabel(text) {
 
 function onOpenCVFail(reason) {
   cvLoading     = false;
-  cvLoadPromise = null;
+  cvLoadPromise = null; // allow retry
+  clearInterval(indeterminateTimer);
+  indeterminateTimer = null;
   setOpenCVLoadingLabel('Failed: ' + reason);
+  const bar = $('opencv-progress-fill');
+  if (bar) { bar.style.width = '100%'; bar.style.background = '#ef4444'; }
   const btn = $('btn-opencv-retry');
   if (btn) btn.style.display = 'inline-flex';
 }
