@@ -2,10 +2,13 @@
 // OpenCV is ~8MB, downloaded once and cached by the browser.
 // Call loadOpenCV() to start; it shows a loading screen automatically.
 //
-// Package: @techstark/opencv-js
-// This build exposes window.cv as a Promise<cvInstance> — NOT the raw
-// Emscripten window.Module / onRuntimeInitialized API. We wait for
-// script.onload, then await window.cv.then() to get the actual cv object.
+// Package: @techstark/opencv-js (browser UMD build)
+//
+// window.cv after script load is an Emscripten module object — it has a
+// .then property but it is NOT a real Promise. Calling .then() on it returns
+// undefined, so chaining .catch() crashes. The correct pattern is to set
+// cv['onRuntimeInitialized'] directly on the cv object (not window.Module)
+// before or immediately after the script executes.
 
 let cv            = null;
 let cvLoading     = false;
@@ -25,13 +28,13 @@ function loadOpenCV() {
 
     const xhr = new XMLHttpRequest();
     xhr.open('GET', OPENCV_URL, true);
-    xhr.responseType = 'arraybuffer'; // raw bytes — avoids UTF-8 decode corruption
+    xhr.responseType = 'arraybuffer';
 
     xhr.onprogress = e => {
       if (e.lengthComputable) {
         updateOpenCVProgress(e.loaded / e.total);
       } else {
-        updateOpenCVProgress(-1); // indeterminate animation
+        updateOpenCVProgress(-1);
       }
     };
 
@@ -50,33 +53,34 @@ function loadOpenCV() {
         const blobUrl = URL.createObjectURL(blob);
         const script  = document.createElement('script');
 
-        // @techstark/opencv-js sets window.cv to a Promise<cvInstance>
-        // when the script finishes executing. We wait for script.onload
-        // (script has run) then resolve that Promise to get the cv object.
-        script.onload = () => {
-          URL.revokeObjectURL(blobUrl);
-
-          if (!window.cv) {
-            onOpenCVFail('cv not found after script load');
-            reject(new Error('cv not found after script load'));
-            return;
-          }
-
-          // window.cv is a Promise in the techstark build
-          const cvPromise = (typeof window.cv.then === 'function')
-            ? window.cv
-            : Promise.resolve(window.cv);
-
-          cvPromise.then(instance => {
-            cv        = instance;
+        // Set the callback BEFORE the script executes so we don't miss the
+        // initialization event. The techstark UMD build reads cv['onRuntimeInitialized']
+        // on the cv object itself — NOT window.Module.onRuntimeInitialized.
+        // We pre-set it on window so the script picks it up as it constructs cv.
+        window['cv'] = {
+          onRuntimeInitialized() {
+            // cv is now the fully initialised OpenCV object on window
+            cv        = window.cv;
             cvLoaded  = true;
             cvLoading = false;
+            URL.revokeObjectURL(blobUrl);
             hideOpenCVLoadingScreen();
             resolve(cv);
-          }).catch(err => {
-            onOpenCVFail('Initialisation failed: ' + (err.message || err));
-            reject(err);
-          });
+          },
+        };
+
+        script.onload = () => {
+          // Safety net: if onRuntimeInitialized already fired during script
+          // execution (synchronous init), cvLoaded is already true — no-op.
+          // If cv is available and has Mat (fully built), resolve immediately.
+          if (!cvLoaded && window.cv && window.cv.Mat) {
+            cv        = window.cv;
+            cvLoaded  = true;
+            cvLoading = false;
+            URL.revokeObjectURL(blobUrl);
+            hideOpenCVLoadingScreen();
+            resolve(cv);
+          }
         };
 
         script.onerror = err => {
@@ -156,7 +160,7 @@ function setOpenCVLoadingLabel(text) {
 
 function onOpenCVFail(reason) {
   cvLoading     = false;
-  cvLoadPromise = null; // allow retry
+  cvLoadPromise = null;
   setOpenCVLoadingLabel('Failed: ' + reason);
   const btn = $('btn-opencv-retry');
   if (btn) btn.style.display = 'inline-flex';
