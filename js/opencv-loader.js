@@ -2,13 +2,14 @@
 // OpenCV is ~8MB, downloaded once and cached by the browser.
 // Call loadOpenCV() to start; it shows a loading screen automatically.
 //
-// Package: @techstark/opencv-js (browser UMD build)
+// Why new Function() instead of blob script injection:
+// Script tag injection (script.src = blobUrl) is ASYNC — the script runs
+// on a future event loop tick and immediately overwrites any window.cv we
+// pre-seeded, silently discarding our callback. No error, just silence.
 //
-// window.cv after script load is an Emscripten module object — it has a
-// .then property but it is NOT a real Promise. Calling .then() on it returns
-// undefined, so chaining .catch() crashes. The correct pattern is to set
-// cv['onRuntimeInitialized'] directly on the cv object (not window.Module)
-// before or immediately after the script executes.
+// new Function(text)() executes synchronously, so window.Module is already
+// set when Emscripten reads it at the very top of the script. Our
+// onRuntimeInitialized reference is captured before it can be overwritten.
 
 let cv            = null;
 let cvLoading     = false;
@@ -49,51 +50,33 @@ function loadOpenCV() {
       setOpenCVLoadingLabel('Initialising…');
 
       try {
-        const blob    = new Blob([xhr.response], { type: 'text/javascript' });
-        const blobUrl = URL.createObjectURL(blob);
-        const script  = document.createElement('script');
+        // Decode arraybuffer → text
+        const scriptText = new TextDecoder().decode(xhr.response);
 
-        // Set the callback BEFORE the script executes so we don't miss the
-        // initialization event. The techstark UMD build reads cv['onRuntimeInitialized']
-        // on the cv object itself — NOT window.Module.onRuntimeInitialized.
-        // We pre-set it on window so the script picks it up as it constructs cv.
-        window['cv'] = {
+        // Set window.Module BEFORE executing the script.
+        // Emscripten reads window.Module at the very start of execution to
+        // find callbacks. Because new Function() runs synchronously, our
+        // Module object is already in place when the script captures it.
+        window.Module = {
           onRuntimeInitialized() {
-            // cv is now the fully initialised OpenCV object on window
+            // This fires once WASM compilation finishes.
+            // window.cv is now the fully initialised OpenCV object.
             cv        = window.cv;
             cvLoaded  = true;
             cvLoading = false;
-            URL.revokeObjectURL(blobUrl);
             hideOpenCVLoadingScreen();
             resolve(cv);
           },
         };
 
-        script.onload = () => {
-          // Safety net: if onRuntimeInitialized already fired during script
-          // execution (synchronous init), cvLoaded is already true — no-op.
-          // If cv is available and has Mat (fully built), resolve immediately.
-          if (!cvLoaded && window.cv && window.cv.Mat) {
-            cv        = window.cv;
-            cvLoaded  = true;
-            cvLoading = false;
-            URL.revokeObjectURL(blobUrl);
-            hideOpenCVLoadingScreen();
-            resolve(cv);
-          }
-        };
-
-        script.onerror = err => {
-          URL.revokeObjectURL(blobUrl);
-          onOpenCVFail('Script execution failed');
-          reject(err);
-        };
-
-        script.src = blobUrl;
-        document.head.appendChild(script);
+        // Execute synchronously in global scope.
+        // new Function() creates a function in global scope — correct for
+        // scripts that assign to window.cv and read window.Module.
+        // eslint-disable-next-line no-new-func
+        new Function(scriptText)();
 
       } catch (err) {
-        onOpenCVFail(err.message);
+        onOpenCVFail('Execution failed: ' + (err.message || err));
         reject(err);
       }
     };
