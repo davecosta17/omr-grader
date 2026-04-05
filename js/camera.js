@@ -249,7 +249,8 @@ function usePhoto() {
       fullUrl,
       (warpedUrl) => showCalibrationScreen(warpedUrl, calibOnSave), // onConfirm
       () => { $('screen-home').classList.add('active'); },          // onCancel
-      true  // autoDetect = try OpenCV edge detection
+      false // autoDetect disabled — teacher drags handles manually
+            // TODO: re-enable once OpenCV initialisation is stable
     );
   } else if (gradingAdjust) {
     // Grading with manual border adjustment
