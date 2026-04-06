@@ -239,13 +239,14 @@ async function detectSheetCorners(dataUrl) {
   });
 }
 
-// ── Projection profile grid detection ────────────────────────────
+// ── Grid detection via question number anchors ───────────────────
 // Pure JS — no OpenCV needed.
-// Analyses a WARPED (flat rectangular) grid image to find row and column positions.
-// Returns { rowYs, colGroupXs, confidence }
-//   rowYs: array of 20 fractions [0..1] of image height
-//   colGroupXs: [[A,B,C,D], [A,B,C,D], [A,B,C,D]] fractions of image width
-//   confidence: 0..1 (1 = perfectly regular spacing)
+// Strategy: question numbers sit in a narrow strip on the LEFT of each
+// column group, followed by a visible gap, then [A][B][C][D] boxes.
+// We find the 20 number-blob Y positions per group → row centres.
+// We find the gap right edge → divide remainder into 4 equal answer boxes.
+// Uses adaptive thresholding (integral image) to handle uneven lighting.
+
 function detectGridProfile(dataUrl) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -256,101 +257,229 @@ function detectGridProfile(dataUrl) {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0);
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const result = runProjectionProfiles(imageData);
-      resolve(result);
+      resolve(detectGridFromNumbers(imageData));
     };
     img.onerror = reject;
     img.src = dataUrl;
   });
 }
 
-function runProjectionProfiles(imageData) {
+// ── Adaptive threshold (integral image) ──────────────────────────
+// For each pixel: dark if luma < local_neighbourhood_mean - C
+// kernelR: half-width of neighbourhood (pixels). C: offset constant.
+// Uses summed area table → O(W×H) total, no per-pixel kernel loop.
+function adaptiveThreshold(data, W, H, kernelR, C) {
+  // Grayscale
+  const luma = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    luma[i] = (data[i*4]*77 + data[i*4+1]*150 + data[i*4+2]*29) >> 8;
+  }
+  // Integral image (one extra row+col of zeros for easy boundary handling)
+  const iW = W + 1;
+  const integral = new Float64Array(iW * (H + 1));
+  for (let y = 1; y <= H; y++) {
+    for (let x = 1; x <= W; x++) {
+      integral[y*iW + x] =
+        luma[(y-1)*W + (x-1)]
+        + integral[(y-1)*iW + x]
+        + integral[y*iW + (x-1)]
+        - integral[(y-1)*iW + (x-1)];
+    }
+  }
+  // Threshold
+  const dark = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const x1 = Math.max(0, x - kernelR),  x2 = Math.min(W-1, x + kernelR);
+      const y1 = Math.max(0, y - kernelR),  y2 = Math.min(H-1, y + kernelR);
+      const count = (x2-x1+1) * (y2-y1+1);
+      const sum   = integral[(y2+1)*iW + (x2+1)]
+                  - integral[y1*iW    + (x2+1)]
+                  - integral[(y2+1)*iW + x1]
+                  + integral[y1*iW    + x1];
+      dark[y*W + x] = luma[y*W + x] < (sum / count - C) ? 1 : 0;
+    }
+  }
+  return dark;
+}
+
+// ── Main detection ────────────────────────────────────────────────
+function detectGridFromNumbers(imageData) {
   const { data, width: W, height: H } = imageData;
 
-  // Build grayscale + threshold
-  const dark = new Uint8Array(W * H);
-  for (let i = 0; i < W * H; i++) {
-    const r = data[i*4], g = data[i*4+1], b = data[i*4+2];
-    const luma = (r*77 + g*150 + b*29) >> 8;
-    dark[i] = luma < 140 ? 1 : 0;  // slightly lenient threshold
-  }
+  // Adaptive threshold: 20px neighbourhood, 10 luma units below local mean = dark
+  const dark = adaptiveThreshold(data, W, H, 20, 10);
 
-  // ── Horizontal profile ────────────────────────────────────────
-  const rowProfile = new Float32Array(H);
-  for (let y = 0; y < H; y++) {
-    let sum = 0;
-    for (let x = 0; x < W; x++) sum += dark[y * W + x];
-    rowProfile[y] = sum / W;
-  }
-  const smoothRow = gaussianSmooth1D(rowProfile, 3);
-
-  // Find peaks in horizontal profile (answer rows have many dark pixels)
-  const rowPeaks = findPeaks(smoothRow, 0.05, Math.round(H / 80));
-  // Filter: keep top ~20 by height
-  rowPeaks.sort((a, b) => smoothRow[b] - smoothRow[a]);
-  const topRowPeaks = rowPeaks.slice(0, 25).sort((a, b) => a - b);
-
-  // ── Vertical profile ──────────────────────────────────────────
-  const colProfile = new Float32Array(W);
+  // ── Step 1: Find column group boundaries ─────────────────────
+  // The image has three column groups roughly in equal thirds.
+  // Find the two separator valleys in the full-width horizontal projection.
+  const hFull = new Float32Array(W);
   for (let x = 0; x < W; x++) {
-    let sum = 0;
-    for (let y = 0; y < H; y++) sum += dark[y * W + x];
-    colProfile[x] = sum / H;
+    let s = 0;
+    for (let y = 0; y < H; y++) s += dark[y*W + x];
+    hFull[x] = s / H;
   }
-  const smoothCol = gaussianSmooth1D(colProfile, 3);
-  const colPeaks = findPeaks(smoothCol, 0.05, Math.round(W / 60));
-  colPeaks.sort((a, b) => smoothCol[b] - smoothCol[a]);
-  const topColPeaks = colPeaks.slice(0, 15).sort((a, b) => a - b);
+  const hSmooth = gaussianSmooth1D(hFull, 5);
 
-  // ── Build rowYs ───────────────────────────────────────────────
-  // We want exactly 20 row centres. If we got close, trust them.
-  const rowYs = topRowPeaks.slice(0, 20).map(y => y / H);
-  // Pad or interpolate if fewer than 20
-  while (rowYs.length < 20) {
-    const last = rowYs[rowYs.length - 1] || 0;
-    const step = rowYs.length > 1 ? rowYs[1] - rowYs[0] : 0.04;
-    rowYs.push(Math.min(1, last + step));
-  }
-
-  // ── Build colGroupXs ─────────────────────────────────────────
-  // Expect 12 option columns in 3 groups of 4
-  const colGroupXs = [];
-  if (topColPeaks.length >= 12) {
-    for (let g = 0; g < 3; g++) {
-      colGroupXs.push({
-        optionXs: topColPeaks.slice(g*4, g*4+4).map(x => x / W)
-      });
+  // Find two valleys (column group separators) between the three groups.
+  // Search in the inner two-thirds of the image (avoid edges).
+  function findValleyBetween(lo, hi) {
+    let minVal = Infinity, minX = Math.round((lo + hi) / 2);
+    for (let x = lo; x < hi; x++) {
+      if (hSmooth[x] < minVal) { minVal = hSmooth[x]; minX = x; }
     }
-  } else {
-    // Fallback: use GES_STRUCTURE normalised values
-    colGroupXs.push({ optionXs: [0.1311,0.1767,0.2222,0.2678] });
-    colGroupXs.push({ optionXs: [0.4135,0.4590,0.5100,0.5610] });
-    colGroupXs.push({ optionXs: [0.7049,0.7559,0.8106,0.8597] });
+    return minX;
+  }
+  const sep1 = findValleyBetween(Math.round(W * 0.25), Math.round(W * 0.42));
+  const sep2 = findValleyBetween(Math.round(W * 0.55), Math.round(W * 0.75));
+
+  const thirds = [
+    { x0: 0,    x1: sep1 },
+    { x0: sep1, x1: sep2 },
+    { x0: sep2, x1: W    },
+  ];
+
+  // ── Step 2: Per-column-group detection ───────────────────────
+  const groupRowPeaks = [];
+  const groupAnswerXs = [];
+
+  for (const { x0, x1 } of thirds) {
+    const tw = x1 - x0;
+    if (tw < 10) continue;
+
+    // ── 2a: Find row positions via number column ──────────────
+    // The number column occupies the leftmost ~22% of this group.
+    const numColEnd = x0 + Math.round(tw * 0.22);
+
+    // Vertical projection within the number column strip.
+    // Each question number is a dark blob → peak in this profile.
+    const vProf = new Float32Array(H);
+    for (let y = 0; y < H; y++) {
+      let s = 0;
+      for (let x = x0; x < numColEnd; x++) s += dark[y*W + x];
+      vProf[y] = s / (numColEnd - x0);
+    }
+    const smoothV = gaussianSmooth1D(vProf, 2);
+
+    // Find peaks — these are the question number row centres.
+    // minHeight: 0.04 (numbers are reliably dark after adaptive threshold)
+    // minDist: H/30 prevents double-counting adjacent dark pixels in one number
+    const peaks = findPeaks(smoothV, 0.04, Math.round(H / 30));
+
+    // Keep top 20 by amplitude, then sort by Y position
+    peaks.sort((a, b) => smoothV[b] - smoothV[a]);
+    const top20 = peaks.slice(0, 20).sort((a, b) => a - b);
+
+    if (top20.length >= 8) {  // need at least 8 rows to be useful
+      groupRowPeaks.push(top20);
+    }
+
+    // ── 2b: Find answer box X positions ──────────────────────
+    // Horizontal projection within this group, across the middle 60% of rows
+    // (avoids top/bottom borders that could confuse the gap detection).
+    const midY0 = Math.round(H * 0.20);
+    const midY1 = Math.round(H * 0.80);
+
+    const hProf = new Float32Array(tw);
+    for (let xi = 0; xi < tw; xi++) {
+      let s = 0;
+      const x = x0 + xi;
+      for (let y = midY0; y < midY1; y++) s += dark[y*W + x];
+      hProf[xi] = s / (midY1 - midY0);
+    }
+    const smoothHp = gaussianSmooth1D(hProf, 3);
+
+    // Find the gap: scan from ~15% to 45% of the group width for the minimum.
+    // The number column ends and the gap begins in this range.
+    const gapSearchLo = Math.round(tw * 0.15);
+    const gapSearchHi = Math.round(tw * 0.45);
+    let gapX = gapSearchLo, minV = smoothHp[gapSearchLo];
+    for (let xi = gapSearchLo; xi < gapSearchHi; xi++) {
+      if (smoothHp[xi] < minV) { minV = smoothHp[xi]; gapX = xi; }
+    }
+
+    // Answer area starts after the gap (add a small margin).
+    const ansStart = Math.min(gapX + Math.round(tw * 0.05), Math.round(tw * 0.48));
+    // Answer area ends near the right edge of the group (leave 2% margin).
+    const ansEnd   = tw - Math.round(tw * 0.02);
+    const ansW     = Math.max(1, ansEnd - ansStart);
+
+    // The four answer boxes are equally spaced within the answer area.
+    // Centre of box i = ansStart + (i + 0.5) * ansW/4
+    const optionXs = [0, 1, 2, 3].map(i =>
+      (x0 + ansStart + (i + 0.5) * ansW / 4) / W
+    );
+    groupAnswerXs.push({ optionXs });
   }
 
-  // ── Confidence ───────────────────────────────────────────────
-  const confidence = computeSpacingConfidence(topRowPeaks);
+  // ── Step 3: Merge row positions across column groups ─────────
+  let rowYs, confidence;
 
-  // ── Cell size ────────────────────────────────────────────────
-  // Estimate from peak spacing
-  const avgRowSpacing = topRowPeaks.length > 1
-    ? (topRowPeaks[topRowPeaks.length-1] - topRowPeaks[0]) / (topRowPeaks.length - 1)
-    : H / 22;
-  const avgColSpacing = topColPeaks.length > 1
-    ? (topColPeaks[topColPeaks.length-1] - topColPeaks[0]) / (topColPeaks.length - 1)
-    : W / 14;
+  if (groupRowPeaks.length > 0) {
+    // Use the group with the most detected rows as the primary source.
+    // Cross-validate: if multiple groups agree, confidence goes up.
+    const best = groupRowPeaks.reduce((a, b) => a.length >= b.length ? a : b);
+    confidence = computeSpacingConfidence(best);
 
-  const cellH = (avgRowSpacing * 0.35) / H;
-  const cellW = (avgColSpacing * 0.35) / W;
+    // If we got rows from multiple groups, average their spacings for robustness
+    if (groupRowPeaks.length > 1 && best.length >= 15) {
+      // Refine row positions: average Y of matching rows across groups
+      const allY = best.map(y => {
+        const candidates = [y / H];
+        for (const other of groupRowPeaks) {
+          if (other === best) continue;
+          const closest = other.reduce((c, v) =>
+            Math.abs(v - y) < Math.abs(c - y) ? v : c, other[0]);
+          if (Math.abs(closest - y) < H / 25) candidates.push(closest / H);
+        }
+        return candidates.reduce((a, b) => a + b, 0) / candidates.length;
+      });
+      rowYs = allY;
+      // Boost confidence when multiple groups agree
+      confidence = Math.min(1, confidence * 1.3);
+    } else {
+      rowYs = best.map(y => y / H);
+    }
+
+    // Pad to exactly 20 rows by extrapolating from the detected spacing
+    while (rowYs.length < 20) {
+      const n = rowYs.length;
+      const step = n > 1 ? rowYs[n-1] - rowYs[n-2] : 0.04;
+      rowYs.push(Math.min(1, rowYs[n-1] + step));
+    }
+    rowYs = rowYs.slice(0, 20);
+
+  } else {
+    // No groups detected — fall back to GES_STRUCTURE normalised values
+    rowYs      = GES_STRUCTURE.normalizedRowYs.slice();
+    confidence = 0;
+  }
+
+  // ── Step 4: Cell size estimation ─────────────────────────────
+  const rowSpacingFrac = rowYs.length > 1
+    ? (rowYs[rowYs.length-1] - rowYs[0]) / (rowYs.length - 1)
+    : 0.04;
+  const cellH = rowSpacingFrac * 0.40;
+
+  // Cell width from spacing between adjacent answer box centres
+  let cellW = 0.025;
+  if (groupAnswerXs.length > 0 && groupAnswerXs[0].optionXs.length >= 2) {
+    const spacing = groupAnswerXs[0].optionXs[1] - groupAnswerXs[0].optionXs[0];
+    cellW = spacing * 0.38;
+  }
+
+  const colGroups = groupAnswerXs.length === 3
+    ? groupAnswerXs
+    : GES_STRUCTURE.normalizedBubbleXs.map(xs => ({ optionXs: xs }));
 
   return {
     rowYs,
-    colGroups: colGroupXs,
-    cellW: Math.max(0.015, Math.min(0.07, cellW)),
-    cellH: Math.max(0.010, Math.min(0.04, cellH)),
+    colGroups,
+    cellW:         Math.max(0.012, Math.min(0.07, cellW)),
+    cellH:         Math.max(0.008, Math.min(0.045, cellH)),
     fillThreshold: 0.28,
-    confidence,
-    detectedAuto: true,
+    confidence:    Math.round(confidence * 100) / 100,
+    detectedAuto:  true,
   };
 }
 
