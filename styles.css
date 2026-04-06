@@ -876,3 +876,15 @@ body {
   border: 1.5px solid rgba(255,255,255,0.25);
   font-size: 13px;
 }
+
+/* ── Calibration detect status ─────────────── */
+.calib-detect-status {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.7);
+  background: rgba(0,0,0,0.3);
+  flex-shrink: 0;
+  text-align: center;
+}
+.calib-detect-status.good { color: var(--aqua); }
+.calib-detect-status.warn { color: #f59e0b; }
