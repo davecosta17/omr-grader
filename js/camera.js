@@ -245,12 +245,13 @@ function usePhoto() {
     // Always use corner-adjust for calibration.
     // Try OpenCV auto-detection first; if it loads fast enough the handles
     // snap to the detected corners, otherwise start at the image edges.
+    // Auto-detect grid corners with OpenCV; fall back to default handles if
+    // OpenCV is not yet loaded (first-time users) or detection fails.
     showCornerAdjust(
       fullUrl,
       (warpedUrl) => showCalibrationScreen(warpedUrl, calibOnSave), // onConfirm
       () => { $('screen-home').classList.add('active'); },          // onCancel
-      false // autoDetect disabled — teacher drags handles manually
-            // TODO: re-enable once OpenCV initialisation is stable
+      true  // autoDetect — OpenCV finds the 4 corners automatically
     );
   } else if (gradingAdjust) {
     // Grading with manual border adjustment
@@ -261,8 +262,31 @@ function usePhoto() {
       false
     );
   } else {
-    // Fast path: use the guide-cropped image directly
-    showResultScreen(cropUrl);
+    // Attempt automatic corner detection on the full frame.
+    // If OpenCV is already loaded this is fast (~200ms).
+    // If not loaded, fall back to the guide crop immediately.
+    const cvLib = getCv();
+    if (cvLib) {
+      setProcessingOverlay(true, 'Detecting grid…');
+      detectSheetCorners(fullUrl).then(corners => {
+        setProcessingOverlay(false);
+        if (corners) {
+          // Good detection — warp to standard 1200×900
+          warpPerspective(fullUrl, corners, 1200, 900).then(warpedUrl => {
+            showResultScreen(warpedUrl);
+          }).catch(() => showResultScreen(cropUrl));
+        } else {
+          // Detection failed — use guide crop
+          showResultScreen(cropUrl);
+        }
+      }).catch(() => {
+        setProcessingOverlay(false);
+        showResultScreen(cropUrl);
+      });
+    } else {
+      // OpenCV not loaded — use guide crop directly (still works fine)
+      showResultScreen(cropUrl);
+    }
   }
 }
 
@@ -280,4 +304,18 @@ function adjustAndGrade() {
     () => { showCameraScreen(); initCamera(); },
     false
   );
+}
+
+// ── Processing overlay ────────────────────────────────────────────
+// Brief overlay on the camera screen while auto-detection runs.
+
+function setProcessingOverlay(visible, text) {
+  let el = $('cam-processing-overlay');
+  if (!el) return;
+  if (visible) {
+    el.textContent = text || 'Processing…';
+    el.style.display = 'flex';
+  } else {
+    el.style.display = 'none';
+  }
 }
