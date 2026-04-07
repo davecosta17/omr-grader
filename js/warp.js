@@ -239,6 +239,167 @@ async function detectSheetCorners(dataUrl) {
   });
 }
 
+// ── Hough line grid detection (OpenCV) ───────────────────────────
+// After perspective warp produces a flat rectangular image, detect
+// the printed grid lines using HoughLinesP. Horizontal lines give
+// row positions; vertical lines give column/option positions.
+// Returns the same schema as detectGridFromNumbers() so the two can
+// be compared or either used independently.
+
+async function detectGridLinesOpenCV(dataUrl) {
+  const cvLib = getCv();
+  if (!cvLib) return null;  // OpenCV not loaded — caller falls back
+
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const W = img.naturalWidth, H = img.naturalHeight;
+
+        // Draw to canvas for imread
+        const canvas = document.createElement('canvas');
+        canvas.width = W; canvas.height = H;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+
+        const src  = cvLib.imread(canvas);
+        const gray = new cvLib.Mat();
+        const blur = new cvLib.Mat();
+        const bin  = new cvLib.Mat();
+
+        cvLib.cvtColor(src, gray, cvLib.COLOR_RGBA2GRAY);
+        // Slight blur to reduce noise while keeping line edges sharp
+        cvLib.GaussianBlur(gray, blur, new cvLib.Size(3, 3), 0);
+        // Adaptive threshold — handles uneven lighting across the sheet
+        cvLib.adaptiveThreshold(
+          blur, bin, 255,
+          cvLib.ADAPTIVE_THRESH_MEAN_C, cvLib.THRESH_BINARY_INV,
+          15, 8
+        );
+
+        // ── Detect horizontal lines ───────────────────────────
+        // Isolate horizontal structure with morphological opening.
+        // kernelW = H/3 ensures we only keep lines spanning most of a row group.
+        const hKernelW = Math.max(20, Math.round(W / 3));
+        const hKernel  = cvLib.getStructuringElement(
+          cvLib.MORPH_RECT, new cvLib.Size(hKernelW, 1)
+        );
+        const hLines = new cvLib.Mat();
+        cvLib.morphologyEx(bin, hLines, cvLib.MORPH_OPEN, hKernel);
+
+        // ── Detect vertical lines ─────────────────────────────
+        // Isolate vertical structure.
+        const vKernelH = Math.max(10, Math.round(H / 5));
+        const vKernel  = cvLib.getStructuringElement(
+          cvLib.MORPH_RECT, new cvLib.Size(1, vKernelH)
+        );
+        const vLines = new cvLib.Mat();
+        cvLib.morphologyEx(bin, vLines, cvLib.MORPH_OPEN, vKernel);
+
+        // ── Extract Y positions from horizontal lines ─────────
+        const hProf = new Float32Array(H);
+        for (let y = 0; y < H; y++) {
+          let sum = 0;
+          for (let x = 0; x < W; x++) sum += hLines.ucharAt(y, x);
+          hProf[y] = sum / (W * 255);
+        }
+        const hSmooth   = gaussianSmooth1D(hProf, 2);
+        const hPeaks    = findPeaks(hSmooth, 0.05, Math.round(H / 40));
+        // Peaks are the printed separator lines — midpoints are cell centres
+        const rowYs     = linePeaksToMidpoints(hPeaks, H);
+
+        // ── Extract X positions from vertical lines ───────────
+        const vProf = new Float32Array(W);
+        for (let x = 0; x < W; x++) {
+          let sum = 0;
+          for (let y = 0; y < H; y++) sum += vLines.ucharAt(y, x);
+          vProf[x] = sum / (H * 255);
+        }
+        const vSmooth = gaussianSmooth1D(vProf, 2);
+        const vPeaks  = findPeaks(vSmooth, 0.05, Math.round(W / 50));
+        const colXs   = linePeaksToMidpoints(vPeaks, W);
+
+        // ── Build colGroups: cluster colXs into 3 groups of 4 ─
+        const colGroups = clusterColumnsIntoGroups(colXs, W);
+
+        // ── Clean up OpenCV Mats ──────────────────────────────
+        [src, gray, blur, bin, hKernel, hLines, vKernel, vLines]
+          .forEach(m => { try { m.delete(); } catch(_){} });
+
+        if (rowYs.length < 8 || colGroups.length < 3) {
+          resolve(null);  // not enough detected — caller falls back
+          return;
+        }
+
+        // ── Cell size from line spacing ───────────────────────
+        const rowSpacing = rowYs.length > 1
+          ? (rowYs[rowYs.length-1] - rowYs[0]) / (rowYs.length - 1)
+          : 0.04;
+        const optSpacing = colGroups[0].optionXs.length > 1
+          ? colGroups[0].optionXs[1] - colGroups[0].optionXs[0]
+          : 0.06;
+
+        resolve({
+          rowYs:         rowYs.slice(0, 20),
+          colGroups,
+          cellW:         Math.max(0.012, Math.min(0.07,  optSpacing * 0.38)),
+          cellH:         Math.max(0.008, Math.min(0.045, rowSpacing * 0.40)),
+          fillThreshold: 0.28,
+          confidence:    computeSpacingConfidence(rowYs.map((y, i) => Math.round(y * H))),
+          detectedAuto:  true,
+          method:        'hough',
+        });
+
+      } catch (err) {
+        console.warn('Hough line detection error:', err);
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+
+// Convert an array of line-peak positions to cell-centre midpoints.
+// Each pair of adjacent peaks brackets a cell; the midpoint is the centre.
+// Also prepends a virtual "border" at 0 and appends one at maxVal so
+// the outermost cells are included.
+function linePeaksToMidpoints(peaks, maxVal) {
+  if (peaks.length < 2) return [];
+  const borders = [0, ...peaks, maxVal];
+  const midpoints = [];
+  for (let i = 0; i < borders.length - 1; i++) {
+    midpoints.push((borders[i] + borders[i+1]) / 2 / maxVal);
+  }
+  return midpoints;
+}
+
+// Cluster column X positions into 3 groups of 4 answer options.
+// The three column groups are separated by larger gaps than the
+// gaps between options within a group.
+function clusterColumnsIntoGroups(colXs, W) {
+  if (colXs.length < 12) return [];
+
+  // Find the two largest gaps — these separate the 3 column groups
+  const gaps = [];
+  for (let i = 1; i < colXs.length; i++) {
+    gaps.push({ i, size: colXs[i] - colXs[i-1] });
+  }
+  gaps.sort((a, b) => b.size - a.size);
+  const splitIdxs = gaps.slice(0, 2).map(g => g.i).sort((a, b) => a - b);
+
+  const groups = [
+    colXs.slice(0, splitIdxs[0]),
+    colXs.slice(splitIdxs[0], splitIdxs[1]),
+    colXs.slice(splitIdxs[1]),
+  ];
+
+  // Each group should have ~4 options — keep the 4 closest to equally spaced
+  return groups.map(grp => {
+    const xs = grp.length >= 4 ? grp.slice(0, 4) : grp;
+    return { optionXs: xs };
+  }).filter(g => g.optionXs.length >= 2);
+}
+
 // ── Grid detection via question number anchors ───────────────────
 // Pure JS — no OpenCV needed.
 // Strategy: question numbers sit in a narrow strip on the LEFT of each
