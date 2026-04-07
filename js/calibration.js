@@ -23,30 +23,52 @@ async function showCalibrationScreen(warpedDataUrl, onSave) {
     const el = $(id); if (el) el.classList.remove('active');
   });
 
-  // Run projection profiles in next frame so screen paints first
+  // Run grid detection in next frame so screen paints first.
+  // Strategy: try OpenCV Hough line detection first (most accurate),
+  // fall back to pure-JS number-anchor detection if OpenCV not loaded.
   requestAnimationFrame(() => requestAnimationFrame(async () => {
     try {
-      calibProfile = await detectGridProfile(warpedDataUrl);
+      let profile = null;
+
+      // ── Attempt 1: OpenCV Hough line detection ──────────────
+      if (getCv()) {
+        $('calib-detect-status').textContent = 'Detecting grid lines…';
+        profile = await detectGridLinesOpenCV(warpedDataUrl);
+        if (profile) profile.method = 'hough';
+      }
+
+      // ── Attempt 2: Pure-JS number-anchor detection ──────────
+      if (!profile) {
+        $('calib-detect-status').textContent = 'Analysing grid…';
+        profile = await detectGridProfile(warpedDataUrl);
+        if (profile) profile.method = profile.method || 'anchors';
+      }
+
+      calibProfile = profile;
       drawCalibrationPreview();
 
-      const pct = Math.round(calibProfile.confidence * 100);
+      const pct    = Math.round(calibProfile.confidence * 100);
+      const method = calibProfile.method === 'hough' ? 'line detection' : 'anchor detection';
       if (calibProfile.confidence >= 0.6) {
-        $('calib-detect-status').textContent = `Grid detected (${pct}% confidence) — check overlay looks correct`;
-        $('calib-detect-status').className   = 'calib-detect-status good';
+        $('calib-detect-status').textContent =
+          `Grid detected (${pct}% via ${method}) — check overlay looks correct`;
+        $('calib-detect-status').className = 'calib-detect-status good';
       } else {
-        $('calib-detect-status').textContent = `Low confidence (${pct}%) — the overlay may need adjustment. Consider re-capturing.`;
-        $('calib-detect-status').className   = 'calib-detect-status warn';
+        $('calib-detect-status').textContent =
+          `Low confidence (${pct}%) — drag to adjust the overlay, or re-capture`;
+        $('calib-detect-status').className = 'calib-detect-status warn';
       }
+
     } catch (err) {
       console.error('Grid detection error:', err);
-      $('calib-detect-status').textContent = 'Detection failed — you can still save using estimated positions';
+      $('calib-detect-status').textContent = 'Detection failed — using estimated positions';
       $('calib-detect-status').className   = 'calib-detect-status warn';
-      // Use GES_STRUCTURE fallback
       calibProfile = {
-        rowYs: GES_STRUCTURE.normalizedRowYs.slice(),
-        colGroups: GES_STRUCTURE.normalizedBubbleXs.map(xs => ({ optionXs: xs })),
-        cellW: 0.04, cellH: 0.018, fillThreshold: 0.28,
-        confidence: 0, detectedAuto: false,
+        rowYs:         GES_STRUCTURE.normalizedRowYs.slice(),
+        colGroups:     GES_STRUCTURE.normalizedBubbleXs.map(xs => ({ optionXs: xs })),
+        cellW: 0.04,   cellH: 0.018,
+        fillThreshold: 0.28,
+        confidence:    0, detectedAuto: false,
       };
       drawCalibrationPreview();
     }
