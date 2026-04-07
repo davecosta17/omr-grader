@@ -51,18 +51,36 @@ function loadOpenCV() {
       // Timeout after 30s so we never hang forever.
       let ticks = 0;
       const MAX  = 300; // 300 × 100ms = 30s
+      let hookedThenable = false;
+
+      const finishSuccess = (cvObj) => {
+        clearInterval(poll);
+        cv        = cvObj;
+        cvLoaded  = true;
+        cvLoading = false;
+        hideOpenCVLoadingScreen();
+        resolve(cv);
+      };
 
       const poll = setInterval(() => {
         ticks++;
 
         if (window.cv && window.cv.Mat) {
-          clearInterval(poll);
-          cv        = window.cv;
-          cvLoaded  = true;
-          cvLoading = false;
-          hideOpenCVLoadingScreen();
-          resolve(cv);
+          finishSuccess(window.cv);
           return;
+        }
+
+        // techstark/opencv-js may expose a thenable first; promote it to
+        // the actual cv object once resolved so polling can complete.
+        if (!hookedThenable && window.cv && typeof window.cv.then === 'function') {
+          hookedThenable = true;
+          window.cv.then((resolvedCv) => {
+            if (!resolvedCv) return;
+            window.cv = resolvedCv;
+            if (resolvedCv.Mat) finishSuccess(resolvedCv);
+          }).catch(() => {
+            // Keep polling/timing out through the normal path.
+          });
         }
 
         if (ticks >= MAX) {
@@ -146,4 +164,7 @@ function onOpenCVFail(reason) {
   setOpenCVLoadingLabel('Failed: ' + reason);
   const btn = $('btn-opencv-retry');
   if (btn) btn.style.display = 'inline-flex';
+  // OpenCV is an enhancement. If load fails, don't block the app UI.
+  hideOpenCVLoadingScreen();
+  showToast('OpenCV unavailable — continuing without auto-detection');
 }
