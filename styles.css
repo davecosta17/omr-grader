@@ -1,4 +1,4 @@
-﻿/* ─────────────────────────────────────────────
+/* ─────────────────────────────────────────────
    Ghost Tech OMR — styles.css
    Palette:
      Navy       #000080  (primary bg, topbar, buttons)
@@ -888,3 +888,25 @@ body {
 }
 .calib-detect-status.good { color: var(--aqua); }
 .calib-detect-status.warn { color: #f59e0b; }
+
+/* ── Camera processing overlay ─────────────── */
+.cam-processing-overlay {
+  position: absolute; inset: 0; z-index: 20;
+  background: rgba(0,0,0,0.6);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 14px; color: #fff;
+  backdrop-filter: blur(4px);
+}
+.cam-processing-spinner {
+  width: 40px; height: 40px;
+  border: 3px solid rgba(127,255,212,0.25);
+  border-top-color: var(--aqua);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.cam-processing-label {
+  font-size: 14px; font-weight: 600;
+  color: rgba(255,255,255,0.9);
+  letter-spacing: 0.02em;
+}
