@@ -9,6 +9,7 @@ let cv            = null;
 let cvLoading     = false;
 let cvLoaded      = false;
 let cvLoadPromise = null;
+let cvScriptEl    = null;
 
 // UMD build — sets window.cv as a global after load.
 const OPENCV_URL =
@@ -21,12 +22,31 @@ function loadOpenCV() {
   cvLoadPromise = new Promise((resolve, reject) => {
     cvLoading = true;
     showOpenCVLoadingScreen();
+    setOpenCVLoadingLabel('Downloading vision engine…');
 
-    const script = document.createElement('script');
+    const script = cvScriptEl || document.createElement('script');
     script.src         = OPENCV_URL;
     script.crossOrigin = 'anonymous';
+    script.async       = true;
+    cvScriptEl         = script;
+
+    const fail = (reason, err) => {
+      cvLoading     = false;
+      cvLoadPromise = null; // allow retry
+      if (script.parentNode) script.parentNode.removeChild(script);
+      cvScriptEl = null;
+      onOpenCVFail(reason);
+      reject(err || new Error(reason));
+    };
+
+    // If CDN request stalls (neither onload nor onerror), fail explicitly.
+    const scriptLoadTimeout = setTimeout(() => {
+      fail('Download timed out — retry or check connection',
+        new Error('OpenCV script download timeout'));
+    }, 20000);
 
     script.onload = () => {
+      clearTimeout(scriptLoadTimeout);
       // Poll for window.cv.Mat — only present once fully initialised.
       // Timeout after 30s so we never hang forever.
       let ticks = 0;
@@ -47,18 +67,19 @@ function loadOpenCV() {
 
         if (ticks >= MAX) {
           clearInterval(poll);
-          onOpenCVFail('Initialisation timed out — retry or check connection');
-          reject(new Error('OpenCV init timeout'));
+          fail('Initialisation timed out — retry or check connection',
+            new Error('OpenCV init timeout'));
         }
       }, 100);
     };
 
     script.onerror = () => {
-      onOpenCVFail('Failed to load from CDN — check your connection');
-      reject(new Error('Script load error'));
+      clearTimeout(scriptLoadTimeout);
+      fail('Failed to load from CDN — check your connection',
+        new Error('Script load error'));
     };
 
-    document.head.appendChild(script);
+    if (!script.parentNode) document.head.appendChild(script);
   });
 
   return cvLoadPromise;
