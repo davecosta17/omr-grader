@@ -44,6 +44,13 @@ async function showCalibrationScreen(warpedDataUrl, onSave) {
         if (profile) profile.method = profile.method || 'anchors';
       }
 
+      // Derive a template-specific fill threshold from the captured sheet
+      // so grading is less sensitive to printer/lighting differences.
+      if (profile) {
+        const estimatedThreshold = await estimateTemplateFillThreshold(warpedDataUrl, profile);
+        if (Number.isFinite(estimatedThreshold)) profile.fillThreshold = estimatedThreshold;
+      }
+
       calibProfile = profile;
       drawCalibrationPreview();
 
@@ -168,4 +175,95 @@ function initCalibration() {
   window.addEventListener('resize', () => {
     if (calibWarpedUrl && calibProfile) drawCalibrationPreview();
   });
+}
+
+// ── Threshold calibration ──────────────────────────────────────────
+// Estimate a template-specific fill threshold using the calibration image.
+// The calibration sheet is typically blank, so we model "unfilled" darkness
+// distribution and place the threshold above it with a safety margin.
+
+function estimateTemplateFillThreshold(dataUrl, profile) {
+  return new Promise(resolve => {
+    if (!profile || !profile.rowYs || !profile.colGroups) {
+      resolve(null);
+      return;
+    }
+
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const W = img.naturalWidth;
+        const H = img.naturalHeight;
+        if (!W || !H) { resolve(null); return; }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, W, H);
+
+        const gray = calibToGrayscale(imageData);
+        const halfW = Math.max(1, Math.round((profile.cellW || 0.04) * W));
+        const halfH = Math.max(1, Math.round((profile.cellH || 0.018) * H));
+
+        const samples = [];
+        profile.rowYs.forEach(ry => {
+          const cy = Math.round(ry * H);
+          profile.colGroups.forEach(group => {
+            (group.optionXs || []).forEach(ox => {
+              const cx = Math.round(ox * W);
+              samples.push(sampleRectDarkness(gray, W, H, cx, cy, halfW, halfH));
+            });
+          });
+        });
+
+        if (!samples.length) { resolve(null); return; }
+
+        // Use robust statistics against outliers (dust/pen marks/shadows).
+        const sorted = samples.slice().sort((a, b) => a - b);
+        const q90 = sorted[Math.floor((sorted.length - 1) * 0.90)];
+        const median = sorted[Math.floor((sorted.length - 1) * 0.50)];
+        const spread = Math.max(0.02, q90 - median);
+
+        // Place threshold above observed blank darkness.
+        const estimated = q90 + Math.min(0.16, spread * 1.8 + 0.06);
+        const clamped = Math.max(0.18, Math.min(0.45, estimated));
+        resolve(Math.round(clamped * 1000) / 1000);
+      } catch (err) {
+        console.warn('estimateTemplateFillThreshold:', err);
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+
+function calibToGrayscale(imageData) {
+  const { data, width, height } = imageData;
+  const gray = new Uint8Array(width * height);
+  for (let i = 0; i < gray.length; i++) {
+    const r = data[i * 4];
+    const g = data[i * 4 + 1];
+    const b = data[i * 4 + 2];
+    gray[i] = (r * 77 + g * 150 + b * 29) >> 8;
+  }
+  return gray;
+}
+
+function sampleRectDarkness(gray, imgW, imgH, cx, cy, halfW, halfH) {
+  const x0 = Math.max(0, Math.round(cx - halfW));
+  const x1 = Math.min(imgW - 1, Math.round(cx + halfW));
+  const y0 = Math.max(0, Math.round(cy - halfH));
+  const y1 = Math.min(imgH - 1, Math.round(cy + halfH));
+  let dark = 0;
+  let total = 0;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      total++;
+      if (gray[y * imgW + x] < 128) dark++;
+    }
+  }
+  return total > 0 ? dark / total : 0;
 }
