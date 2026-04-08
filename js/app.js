@@ -122,6 +122,8 @@ initEventListeners();
 initCalibration();    // calibration.js
 initCornerAdjust();   // corner-adjust.js
 registerServiceWorker();
+// Non-blocking warm-up: OpenCV improves auto-detection but is optional.
+loadOpenCV().catch(() => {});
 openDB()
   .then(() => loadExamList())
   .catch(err => showToast('Storage error: ' + (err.message || err), true));
