@@ -175,6 +175,9 @@ async function detectSheetCorners(dataUrl) {
   return new Promise(resolve => {
     const img = new Image();
     img.onload = () => {
+      // Yield to the browser before heavy OpenCV work so the UI stays
+      // responsive and the screen can paint before the thread locks.
+      setTimeout(() => {
       try {
         const canvas = document.createElement('canvas');
         canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
@@ -233,6 +236,7 @@ async function detectSheetCorners(dataUrl) {
         console.warn('Corner detection error:', e);
         resolve(null);
       }
+      }, 0); // end setTimeout
     };
     img.onerror = () => resolve(null);
     img.src = dataUrl;
@@ -253,6 +257,7 @@ async function detectGridLinesOpenCV(dataUrl) {
   return new Promise(resolve => {
     const img = new Image();
     img.onload = () => {
+      setTimeout(() => {
       try {
         const W = img.naturalWidth, H = img.naturalHeight;
 
@@ -353,6 +358,7 @@ async function detectGridLinesOpenCV(dataUrl) {
         console.warn('Hough line detection error:', err);
         resolve(null);
       }
+      }, 0); // end setTimeout
     };
     img.onerror = () => resolve(null);
     img.src = dataUrl;
