@@ -40,8 +40,18 @@ function loadOpenCV() {
           cv        = window.cv;
           cvLoaded  = true;
           cvLoading = false;
+          // Hide the loading screen first, then wait for TWO animation frames
+          // before resolving. This guarantees the browser paints the removal
+          // of the loading screen before the calling code runs any synchronous
+          // OpenCV operations — without this the main thread blocks before the
+          // repaint and the loading screen appears frozen even though it was
+          // dismissed in code.
           hideOpenCVLoadingScreen();
-          resolve(cv);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              resolve(cv);
+            });
+          });
           return;
         }
 
