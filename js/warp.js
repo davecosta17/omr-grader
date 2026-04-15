@@ -168,9 +168,43 @@ function warpPerspective(srcDataUrl, corners, outW, outH) {
 // ── OpenCV edge detection for auto-corner finding ─────────────────
 // Returns Promise<{tl,tr,br,bl}> in source image pixel coords,
 // or null if no reliable quadrilateral found.
+// ── Image downscale helper ───────────────────────────────────────
+// Resize a dataUrl to at most maxW×maxH before passing to OpenCV.
+// OpenCV detection needs geometry, not megapixels. 640px is ample.
+// Returns a Promise<{dataUrl, scaleX, scaleY}> so callers can map
+// pixel coordinates back to the original image dimensions.
+function downscaleDataUrl(dataUrl, maxW, maxH) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const srcW = img.naturalWidth;
+      const srcH = img.naturalHeight;
+      const scale = Math.min(1, maxW / srcW, maxH / srcH);
+      const dstW  = Math.round(srcW * scale);
+      const dstH  = Math.round(srcH * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = dstW; canvas.height = dstH;
+      canvas.getContext('2d').drawImage(img, 0, 0, dstW, dstH);
+      resolve({
+        dataUrl: canvas.toDataURL('image/jpeg', 0.9),
+        scaleX:  srcW / dstW,
+        scaleY:  srcH / dstH,
+      });
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
 async function detectSheetCorners(dataUrl) {
   let cvLib;
   try { cvLib = await loadOpenCV(); } catch(e) { return null; }
+
+  // Downscale before OpenCV — corner detection needs geometry, not resolution.
+  // 640×480 is ample; reduces computation 20-50x on phone cameras.
+  let scaled;
+  try { scaled = await downscaleDataUrl(dataUrl, 640, 480); }
+  catch(e) { return null; }
 
   return new Promise(resolve => {
     const img = new Image();
@@ -223,7 +257,14 @@ async function detectSheetCorners(dataUrl) {
             pts.sort((a,b) => a.x - b.x);
             const left  = pts.slice(0,2).sort((a,b) => a.y - b.y);
             const right = pts.slice(2,4).sort((a,b) => a.y - b.y);
-            result = { tl: left[0], bl: left[1], tr: right[0], br: right[1] };
+            // Scale corner coords back to original image dimensions
+            const sx = scaled.scaleX, sy = scaled.scaleY;
+            result = {
+              tl: { x: left[0].x  * sx, y: left[0].y  * sy },
+              bl: { x: left[1].x  * sx, y: left[1].y  * sy },
+              tr: { x: right[0].x * sx, y: right[0].y * sy },
+              br: { x: right[1].x * sx, y: right[1].y * sy },
+            };
           }
           approx.delete();
         }
@@ -239,7 +280,7 @@ async function detectSheetCorners(dataUrl) {
       }, 0); // end setTimeout
     };
     img.onerror = () => resolve(null);
-    img.src = dataUrl;
+    img.src = scaled.dataUrl;  // use downscaled image
   });
 }
 
@@ -252,7 +293,12 @@ async function detectSheetCorners(dataUrl) {
 
 async function detectGridLinesOpenCV(dataUrl) {
   const cvLib = getCv();
-  if (!cvLib) return null;  // OpenCV not loaded — caller falls back
+  if (!cvLib) return null;
+
+  // Downscale — Hough line detection needs grid geometry, not full resolution
+  let scaled;
+  try { scaled = await downscaleDataUrl(dataUrl, 800, 600); }
+  catch(e) { return null; }
 
   return new Promise(resolve => {
     const img = new Image();
@@ -427,7 +473,7 @@ function detectGridProfile(dataUrl) {
       resolve(detectGridFromNumbers(imageData));
     };
     img.onerror = reject;
-    img.src = dataUrl;
+    img.src = scaled.dataUrl;
   });
 }
 
